@@ -2312,6 +2312,11 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('手机执行器')).assertEqual(-1);
       expect(html.indexOf('桌面编排')).assertEqual(-1);
       expect(html.indexOf('桌面代理')).assertEqual(-1);
+      expect(html.indexOf('--blue:#995f4c')).assertLarger(-1);
+      expect(html.indexOf('--green:#2f7754')).assertLarger(-1);
+      expect(html.indexOf('--green-soft:#e4f1e8')).assertLarger(-1);
+      expect(html.indexOf('#2f6feb')).assertEqual(-1);
+      expect(html.indexOf('#18a34a')).assertEqual(-1);
       expect(html.indexOf('rawPreview')).assertEqual(-1);
     });
 
