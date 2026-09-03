@@ -108,6 +108,7 @@ import { isValidDailyBriefAction } from '../dailybrief/DailyBriefStore';
 
 const HTML_HOME_VERSION: number = 1;
 const HISTORY_LIMIT: number = 6;
+const REGISTRY_PEER_HISTORY_LIMIT: number = 50;
 type HtmlHomeTextValue = Object | string | number | boolean | null | undefined;
 
 interface HtmlHomeDocumentWithBusy extends HtmlHomeDocument {
@@ -225,7 +226,10 @@ export function createHtmlHomeDocument(params: CreateHtmlHomeDocumentParams): Ht
     timeline: [],
     blocks: [],
     actions: [],
-    history: recentHistory(params.messages),
+    history: recentHistory(
+      params.messages,
+      surface.surfaceId.startsWith('registry-peer-') ? REGISTRY_PEER_HISTORY_LIMIT : HISTORY_LIMIT
+    ),
     persona: htmlPersona(surface),
     personaMemory: htmlPersonaMemory(surface),
     rawSurfaceRoot: root,
@@ -1939,8 +1943,11 @@ function appendTimeline(timeline: HtmlHomeTimelineItem[], title: HtmlHomeTextVal
   });
 }
 
-function recentHistory(messages: A2uiMessage[]): HtmlHomeHistoryItem[] {
-  const start = messages.length > HISTORY_LIMIT ? messages.length - HISTORY_LIMIT : 0;
+function recentHistory(
+  messages: A2uiMessage[],
+  limit: number = HISTORY_LIMIT
+): HtmlHomeHistoryItem[] {
+  const start = messages.length > limit ? messages.length - limit : 0;
   const history: HtmlHomeHistoryItem[] = [];
   for (let index = start; index < messages.length; index++) {
     const content = visibleHistoryContent(messages[index]);

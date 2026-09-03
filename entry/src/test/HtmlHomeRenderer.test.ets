@@ -2,6 +2,7 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   A2uiAction,
   A2uiFoodData,
+  A2uiMessage,
   A2uiSurfaceState,
   A2uiSurfaceStore,
   HotelSearchResult,
@@ -2320,7 +2321,7 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('rawPreview')).assertEqual(-1);
     });
 
-    it('reuses the plain chat shell for an empty registry peer conversation', 0, () => {
+    it('renders registry peer conversation with a chronological bubble-only branch', 0, () => {
       const doc = documentFixture();
       doc.surfaceId = 'registry-peer-HW-Phone1';
       doc.source = 'model';
@@ -2333,10 +2334,45 @@ export default function htmlHomeRendererTest() {
       const html = renderHtmlHomeDocument(doc);
 
       expect(isHtmlHomeConversationDocument(html)).assertTrue();
-      expect(html.indexOf("'和 ' + (peerName || 'Appless') + ' 聊聊'")).assertLarger(-1);
-      expect(html.indexOf('消息由注册中心直接转发')).assertLarger(-1);
-      expect(html.indexOf('emptyAssistantTurn.hidden = true')).assertLarger(-1);
-      expect(html.indexOf('assistantTurn.hidden = false')).assertLarger(-1);
+      expect(html.indexOf('function addRegistryPeerChat(parent, history)')).assertLarger(-1);
+      expect(html.indexOf('registry-peer-chat')).assertLarger(-1);
+      expect(html.indexOf('addRegistryPeerChat(shell, history)')).assertLarger(-1);
+      expect(html.indexOf('renderRegistryPeerHistory(section, history)')).assertLarger(-1);
+      expect(html.indexOf('if (registryPeerName().length > 0) { return; }')).assertLarger(-1);
+    });
+
+    it('keeps more than six registry peer messages available for scrolling', 0, () => {
+      const surface: A2uiSurfaceState = {
+        surfaceId: 'registry-peer-Appless-Phone2',
+        rootId: 'root',
+        title: 'Appless-Phone2',
+        intent: 'general',
+        status: 'ready',
+        components: [],
+        dataModelJson: '{}',
+        error: '',
+        sequence: 8
+      };
+      const messages: A2uiMessage[] = [
+        { id: 'p1', role: 'user', content: 'one' },
+        { id: 'p2', role: 'assistant', content: 'two' },
+        { id: 'p3', role: 'user', content: 'three' },
+        { id: 'p4', role: 'assistant', content: 'four' },
+        { id: 'p5', role: 'user', content: 'five' },
+        { id: 'p6', role: 'assistant', content: 'six' },
+        { id: 'p7', role: 'user', content: 'seven' },
+        { id: 'p8', role: 'assistant', content: 'eight' }
+      ];
+      const doc = createHtmlHomeDocument({
+        surface: surface,
+        messages: messages,
+        isBusy: false,
+        isAwaitingFirstSurface: false
+      });
+
+      expect(doc.history.length).assertEqual(8);
+      expect(doc.history[0].content).assertEqual('one');
+      expect(doc.history[7].content).assertEqual('eight');
     });
 
     it('escapes dangerous script text in embedded JSON', 0, () => {

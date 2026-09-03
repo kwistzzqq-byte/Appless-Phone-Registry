@@ -1036,6 +1036,26 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
 .plain-chat {
   margin-top: 0;
 }
+.registry-peer-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 24px;
+}
+.registry-peer-chat .plain-chat-user-message {
+  display: block;
+  max-width: 82%;
+  margin: 0 0 0 auto;
+}
+.registry-peer-chat .plain-chat-assistant-turn {
+  display: block;
+  max-width: 82%;
+  margin: 0 auto 0 0;
+}
+.registry-peer-chat .plain-chat-response {
+  padding: 10px 12px;
+  border-radius: 5px 16px 16px 16px;
+}
 .plain-chat-user-message {
   display: grid;
   grid-template-columns: 24px minmax(0, auto);
@@ -4008,6 +4028,29 @@ const HTML_HOME_JS: string = `
     });
     addPlainChatContext(section, contextItems);
   }
+  function renderRegistryPeerHistory(section, history) {
+    section.textContent = '';
+    history.forEach(function (item) {
+      var content = text(item && item.content).trim();
+      if (content.length === 0) { return; }
+      if (text(item && item.role) === 'user') {
+        var userMessage = add(section, 'article', 'plain-chat-user-message');
+        var userCopy = add(userMessage, 'p', 'plain-chat-user-copy');
+        add(userCopy, 'span', 'plain-chat-user-text', content);
+        return;
+      }
+      var peerTurn = add(section, 'div', 'plain-chat-assistant-turn');
+      var response = add(peerTurn, 'article', 'plain-chat-response');
+      add(response, 'p', 'plain-chat-response-copy', content);
+    });
+    setTimeout(function () {
+      window.scrollTo(0, document.body ? document.body.scrollHeight : 0);
+    }, 0);
+  }
+  function addRegistryPeerChat(parent, history) {
+    var section = add(parent, 'section', 'section plain-chat registry-peer-chat');
+    renderRegistryPeerHistory(section, history);
+  }
   function thinkingRequest(timeline, history) {
     for (var index = 0; index < timeline.length; index += 1) {
       var item = timeline[index];
@@ -4210,6 +4253,24 @@ const HTML_HOME_JS: string = `
     var blocks = list(data.blocks);
     var timeline = list(data.timeline);
     var history = list(data.history);
+    if (registryPeerName().length > 0) {
+      if (!section.classList.contains('registry-peer-chat')) {
+        data = previousData;
+        isBusy = previousBusy;
+        isDeepSearch = previousDeepSearch;
+        scene = previousScene;
+        return false;
+      }
+      renderRegistryPeerHistory(section, history);
+      if (document.body) {
+        document.body.setAttribute('data-view', 'conversation');
+        document.body.removeAttribute('data-scene');
+        document.body.removeAttribute('data-user-motion');
+      }
+      var peerDataNode = document.getElementById('home-data');
+      if (peerDataNode) { peerDataNode.textContent = JSON.stringify(data); }
+      return true;
+    }
     var thinking = isThinkingDocument() && blocks.length === 0;
     var assistant = latestAssistant(history);
     var plainChat = isPlainChatScene(blocks, timeline, history);
@@ -4346,6 +4407,7 @@ const HTML_HOME_JS: string = `
     });
   }
   function renderSceneHero(parent) {
+    if (registryPeerName().length > 0) { return; }
     if (isThinkingDocument()) { addConversationHero(parent); return; }
     if (!isEnhancedScene()) { addLegacyHero(parent); return; }
     if (scene === 'gmail') { addGmailHero(parent); return; }
@@ -6290,7 +6352,9 @@ const HTML_HOME_JS: string = `
   var history = list(data.history);
   var plainChat = isPlainChatScene(blocks, timeline, history);
   var thinkingScene = isThinkingDocument() && blocks.length === 0;
-  if (thinkingScene) {
+  if (registryPeerName().length > 0) {
+    addRegistryPeerChat(shell, history);
+  } else if (thinkingScene) {
     addThinkingScene(shell, timeline, history);
   } else if (plainChat) {
     addPlainChat(shell, history);
