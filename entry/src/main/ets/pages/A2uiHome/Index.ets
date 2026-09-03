@@ -502,6 +502,25 @@ import {
   clearUiLabModelSettings,
   configureUiLabModelSettings
 } from './lab/UiLabRuntimeConfig';
+import { applessRegistryConfig, ApplessRegistryConfig } from '../../registry/ApplessRegistryConfig';
+import { ApplessTunnelClient } from '../../registry/ApplessTunnelClient';
+import {
+  RegistryAgentReply,
+  sendRegistryPeerChatMessage
+} from '../../registry/ApplessRegistryOutboundClient';
+import {
+  executeApplessRegistryTool,
+  isApplessRegistryToolId,
+  registryStandardToolsOwnPrompt
+} from '../../registry/ApplessRegistryTools';
+import {
+  a2aCompletedResponse,
+  a2aErrorResponse,
+  applessAgentCardResponse,
+  TunnelForwardRequest,
+  TunnelHttpResponse,
+  validateA2aTextRequest
+} from '../../registry/ApplessA2aProtocol';
 
 interface FoodStoreMapLocationActionArgs {
   surfaceId: string;
@@ -1121,6 +1140,10 @@ struct Index {
   @State paymentCheckoutNote: string = '';
   @State inputPlaceholder: string = DEFAULT_INPUT_PLACEHOLDER;
   @State messages: A2uiMessage[] = [];
+  @State registryPeerServiceId: string = '';
+  @State registryPeerTitle: string = '';
+  @State registryPeerMessages: A2uiMessage[] = [];
+  @State registryPeerBusyServiceId: string = '';
   @State streamingAssistantDomText: string = '';
   @State streamingAssistantDomTick: number = 0;
   @State personaPacks: PersonaPack[] = allPersonaPacks();
@@ -1236,6 +1259,12 @@ struct Index {
   private luckinReturnSurface: A2uiSurfaceState | null = null;
   private hotelReturnSurface: A2uiSurfaceState | null = null;
   private multiAgentRuntime: MultiAgentCanaryRuntime | null = null;
+  private registryTunnelClient: ApplessTunnelClient | null = null;
+  private registryRemoteBusy: boolean = false;
+  private registryMainConversationDraft: string = '';
+  private registryPeerMessageSequence: number = 0;
+  private registryPeerMessagesByServiceId: Map<string, A2uiMessage[]> = new Map<string, A2uiMessage[]>();
+  private registryPeerDraftByServiceId: Map<string, string> = new Map<string, string>();
   private phoneLocalMemoryRuntime: PhoneLocalMemoryRuntime | null = null;
   private phoneLocalMemoryAvailability: PhoneLocalMemoryAvailabilityPort | null = null;
   private bimStoreInstance: BimStore | null = null;
@@ -3163,6 +3192,9 @@ struct Index {
   }
 
   private htmlHomeHtmlForView(): string {
+    if (this.registryPeerConversationActive()) {
+      return this.currentHtmlHomeHtml();
+    }
     return htmlHomeHtmlForViewValue(
       this.showDeepSearch,
       this.currentSurface.intent,
@@ -3196,16 +3228,19 @@ struct Index {
     this.subscribeTrainPresaleHandoff();
     this.subscribeWaterfallConversationTypedTest();
     this.requestPendingTrainPresaleResume();
+    this.startRegistryTunnel();
   }
 
   onPageShow(): void {
     this.subscribeTrainPresaleHandoff();
     this.subscribeWaterfallConversationTypedTest();
     this.requestPendingTrainPresaleResume();
+    this.startRegistryTunnel();
   }
 
   onPageHide(): void {
     this.unsubscribeTrainPresaleHandoff();
+    this.stopRegistryTunnel();
   }
 
   aboutToDisappear(): void {
@@ -3216,6 +3251,7 @@ struct Index {
     this.interestWaterfallRankingRevision += 1;
     this.interestRefreshPreloadRankingRevision += 1;
     this.waterfallRankingWorkerClient.dispose();
+    this.stopRegistryTunnel();
   }
 
   private loadBimMotionPreference(): void {
@@ -4036,12 +4072,15 @@ struct Index {
   }
 
   private getSettings(): LocalModelSettings {
+    const registry = applessRegistryConfig();
+    const useRegistryModel = this.apiKey.trim().length === 0 && registry.modelApiKey.length > 0 &&
+      registry.modelBaseUrl.length > 0 && registry.modelName.length > 0;
     return {
-      provider: defaultLocalModelSettings().provider,
-      baseUrl: this.baseUrl,
-      model: this.selectedModel,
-      apiKey: this.apiKey,
-      customParametersJson: this.customParametersJson,
+      provider: useRegistryModel ? 'ApplessRegistry' : defaultLocalModelSettings().provider,
+      baseUrl: useRegistryModel ? registry.modelBaseUrl : this.baseUrl,
+      model: useRegistryModel ? registry.modelName : this.selectedModel,
+      apiKey: useRegistryModel ? registry.modelApiKey : this.apiKey,
+      customParametersJson: useRegistryModel ? registry.modelCustomParametersJson : this.customParametersJson,
       ignoreToolSurfaceUpdates: this.ignoreToolSurfaceUpdates
     };
   }
@@ -4472,6 +4511,9 @@ struct Index {
         args: Object,
         onPartial?: (result: DataResult) => void
       ): Promise<DataResult> => {
+        if (isApplessRegistryToolId(toolId)) {
+          return executeApplessRegistryTool(toolId, prompt, args);
+        }
         const callArgs = await this.argsWithCurrentLocationForTool(toolId, prompt, args);
         return callStructuredTool(toolId, prompt, callArgs, onPartial);
       },
@@ -4584,6 +4626,77 @@ struct Index {
       throw new Error('MULTI_AGENT_MODEL_UNAVAILABLE');
     }
     return this.multiAgentModel;
+  }
+
+  private startRegistryTunnel(): void {
+    const config: ApplessRegistryConfig = applessRegistryConfig();
+    if (!config.enabled) return;
+    if (this.registryTunnelClient === null) {
+      this.registryTunnelClient = new ApplessTunnelClient(
+        config,
+        (request: TunnelForwardRequest): Promise<TunnelHttpResponse> => this.handleRegistryRequest(request, config)
+      );
+    }
+    this.registryTunnelClient.start();
+  }
+
+  private stopRegistryTunnel(): void {
+    if (this.registryTunnelClient !== null) this.registryTunnelClient.stop();
+  }
+
+  private async handleRegistryRequest(
+    request: TunnelForwardRequest,
+    config: ApplessRegistryConfig
+  ): Promise<TunnelHttpResponse> {
+    const agentCard = applessAgentCardResponse(request, config);
+    if (agentCard !== null) return agentCard;
+    const input = validateA2aTextRequest(request, config);
+    if (!input.ok) return a2aErrorResponse(input.status, input.error, input.requestId);
+    if (input.peerChat) {
+      this.appendRegistryPeerMessage(input.senderServiceId, 'assistant', input.text);
+      aiLogInfo('[ApplessRegistryPeerChat] stage=received peer=' + input.senderServiceId +
+        ' chars=' + input.text.length.toString());
+      return a2aCompletedResponse(input.requestId, 'DELIVERED');
+    }
+    if (this.isBusy || this.registryRemoteBusy) {
+      return a2aErrorResponse(409, 'Appless is busy with another foreground turn.', input.requestId);
+    }
+    this.registryRemoteBusy = true;
+    aiLogInfo('[ApplessRegistryA2A] stage=started promptChars=' + input.text.length.toString());
+    try {
+      const provider = new LlmProvider(
+        'ApplessRegistry',
+        config.modelApiKey,
+        config.modelBaseUrl,
+        config.modelName,
+        config.modelCustomParametersJson
+      );
+      if (!provider.isConfigured()) {
+        return a2aErrorResponse(503, 'Appless Registry model is not configured.', input.requestId);
+      }
+      const prompt = [
+        'You are Appless Phone exposed as a read-only A2A text agent.',
+        'Answer the user request directly and concisely.',
+        'Do not claim to send messages, change contacts, make payments, place orders, or control the device.',
+        'Return plain text only.',
+        '',
+        'User request:',
+        input.text
+      ].join('\n');
+      const raw = await new OpenAiCompatibleModel(provider).complete(prompt);
+      const answer = stripMailReplyAiText(raw).trim();
+      if (answer.length === 0) {
+        return a2aErrorResponse(502, 'Appless model returned an empty response.', input.requestId);
+      }
+      aiLogInfo('[ApplessRegistryA2A] stage=completed answerChars=' + answer.length.toString());
+      return a2aCompletedResponse(input.requestId, answer);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : JSON.stringify(error);
+      aiLogError('[ApplessRegistryA2A] stage=failed reason=' + logSnippet(message));
+      return a2aErrorResponse(502, 'Appless model request failed.', input.requestId);
+    } finally {
+      this.registryRemoteBusy = false;
+    }
   }
 
   private currentPanelState(): ConnectionPanelState {
@@ -4750,6 +4863,14 @@ struct Index {
   }
 
   private currentHtmlHomeDocument(): HtmlHomeDocument {
+    if (this.registryPeerConversationActive()) {
+      return createHtmlHomeDocument({
+        surface: this.registryPeerSurface(),
+        messages: this.registryPeerMessages,
+        isBusy: this.registryPeerConversationBusy(),
+        isAwaitingFirstSurface: false
+      });
+    }
     if (shouldShowDeepSearchPendingSurface(this.showDeepSearch, this.isBusy)) {
       const document = createHtmlHomeDocument({
         messages: this.messages,
@@ -4819,6 +4940,15 @@ struct Index {
   }
 
   private currentHtmlHomeCacheKey(): string {
+    if (this.registryPeerConversationActive()) {
+      return [
+        'registry-peer',
+        this.registryPeerServiceId,
+        this.registryPeerConversationBusy() ? 'busy' : 'idle',
+        this.surfaceRenderTick.toString(),
+        JSON.stringify(this.registryPeerMessages)
+      ].join('|');
+    }
     const needsInputText = shouldShowQueryPendingSurface(this.isBusy, this.isAwaitingFirstSurface);
     return [
       this.currentSurface.surfaceId,
@@ -4854,7 +4984,7 @@ struct Index {
     const document = this.withMultiTaskActiveSection(this.currentHtmlHomeDocument());
     const animateLatestUser: boolean = document.kind === 'thinking' && document.source === 'pending' &&
       this.promptSubmitMotionGeneration > this.renderedPromptSubmitMotionGeneration;
-    const html = renderHtmlHomeDocument(document, this.isBusy,
+    const html = renderHtmlHomeDocument(document, this.visibleConversationBusy(),
       document.kind === 'food' && document.surfaceId === this.foodLocationOwnerSurfaceId ? {
         longitude: this.foodLocationLongitude,
         latitude: this.foodLocationLatitude,
@@ -5476,6 +5606,128 @@ struct Index {
     });
     this.messages = next;
     return messageId;
+  }
+
+  private registryPeerConversationActive(): boolean {
+    return this.registryPeerServiceId.length > 0;
+  }
+
+  private registryPeerConversationBusy(): boolean {
+    return this.registryPeerConversationActive() &&
+      this.registryPeerBusyServiceId === this.registryPeerServiceId;
+  }
+
+  private visibleConversationBusy(): boolean {
+    return this.registryPeerConversationActive() ? this.registryPeerConversationBusy() : this.isBusy;
+  }
+
+  private visibleConversationMessages(): A2uiMessage[] {
+    return this.registryPeerConversationActive() ? this.registryPeerMessages : this.messages;
+  }
+
+  private registryPeerSurface(): A2uiSurfaceState {
+    return {
+      surfaceId: 'registry-peer-' + this.registryPeerServiceId,
+      rootId: 'root',
+      title: this.registryPeerTitle,
+      intent: 'general',
+      status: this.registryPeerConversationBusy() ? 'thinking' : 'ready',
+      components: [],
+      dataModelJson: '{}',
+      error: '',
+      sequence: this.registryPeerMessages.length
+    };
+  }
+
+  private appendRegistryPeerMessage(serviceId: string, role: string, content: string): void {
+    const stored = this.registryPeerMessagesByServiceId.get(serviceId);
+    const next: A2uiMessage[] = stored === undefined ? [] : stored.slice();
+    this.registryPeerMessageSequence += 1;
+    const messageId = 'registry-peer-' + Date.now().toString() + '-' +
+      this.registryPeerMessageSequence.toString();
+    next.push({ id: messageId, role: role, content: content });
+    this.registryPeerMessagesByServiceId.set(serviceId, next);
+    if (this.registryPeerServiceId === serviceId) {
+      this.registryPeerMessages = next;
+    }
+    this.surfaceRenderTick += 1;
+    this.htmlHomeCacheKey = '';
+    this.htmlHomeCacheHtml = '';
+  }
+
+  private openRegistryPeerConversation(action: A2uiAction): void {
+    const raw = action.args as Record<string, Object | string | number | boolean | null | undefined> | undefined;
+    const serviceId = raw === undefined ? '' : this.actionText(raw['serviceId']).trim();
+    if (serviceId.length === 0) {
+      this.logHtmlHomeActionError(action, 'missing_registry_peer_service_id');
+      return;
+    }
+    if (this.registryPeerConversationActive()) {
+      this.registryPeerDraftByServiceId.set(this.registryPeerServiceId, this.inputText);
+    } else {
+      this.registryMainConversationDraft = this.inputText;
+    }
+    const storedMessages = this.registryPeerMessagesByServiceId.get(serviceId);
+    const storedDraft = this.registryPeerDraftByServiceId.get(serviceId);
+    this.registryPeerServiceId = serviceId;
+    this.registryPeerTitle = serviceId;
+    this.registryPeerMessages = storedMessages === undefined ? [] : storedMessages.slice();
+    this.inputText = storedDraft === undefined ? '' : storedDraft;
+    this.showHistory = false;
+    this.clearStreamingAssistantMessage();
+    this.htmlHomeCacheKey = '';
+    this.htmlHomeCacheHtml = '';
+    this.surfaceRenderTick += 1;
+    aiLogInfo('[ApplessRegistryPeerChat] stage=opened peer=' + serviceId);
+  }
+
+  private closeRegistryPeerConversation(): void {
+    if (!this.registryPeerConversationActive()) return;
+    const serviceId = this.registryPeerServiceId;
+    this.registryPeerDraftByServiceId.set(serviceId, this.inputText);
+    this.registryPeerServiceId = '';
+    this.registryPeerTitle = '';
+    this.registryPeerMessages = [];
+    this.inputText = this.registryMainConversationDraft;
+    this.htmlHomeCacheKey = '';
+    this.htmlHomeCacheHtml = '';
+    this.surfaceRenderTick += 1;
+    aiLogInfo('[ApplessRegistryPeerChat] stage=closed peer=' + serviceId);
+  }
+
+  private async sendRegistryPeerMessage(): Promise<void> {
+    const serviceId = this.registryPeerServiceId;
+    const message = this.inputText;
+    if (serviceId.length === 0 || message.trim().length === 0 ||
+      this.registryPeerBusyServiceId.length > 0) return;
+    this.inputText = '';
+    this.appendRegistryPeerMessage(serviceId, 'user', message);
+    this.registryPeerBusyServiceId = serviceId;
+    this.surfaceRenderTick += 1;
+    this.htmlHomeCacheKey = '';
+    aiLogInfo('[ApplessRegistryPeerChat] stage=sending peer=' + serviceId +
+      ' chars=' + message.length.toString());
+    try {
+      const reply: RegistryAgentReply = await sendRegistryPeerChatMessage(
+        applessRegistryConfig(), serviceId, message);
+      if (reply.state !== 'completed') {
+        throw new Error(reply.text);
+      }
+      aiLogInfo('[ApplessRegistryPeerChat] stage=delivered peer=' + serviceId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : JSON.stringify(error);
+      this.appendRegistryPeerMessage(serviceId, 'assistant', '发送失败：' + detail);
+      aiLogError('[ApplessRegistryPeerChat] stage=failed peer=' + serviceId +
+        ' reason=' + logSnippet(detail));
+    } finally {
+      if (this.registryPeerBusyServiceId === serviceId) {
+        this.registryPeerBusyServiceId = '';
+      }
+      if (this.registryPeerServiceId === serviceId) {
+        this.surfaceRenderTick += 1;
+        this.htmlHomeCacheKey = '';
+      }
+    }
   }
 
   private updateMessageContent(messageId: string, content: string): boolean {
@@ -6105,7 +6357,10 @@ struct Index {
       const explicitDecision = explicitDeepSearchRouteDecision(trimmed);
       if (explicitDecision !== null) {
         autoDeep = explicitDecision === 'deepsearch';
-      } else if (!hasAggregateSearchIntent(trimmed)) {
+      } else if (!hasAggregateSearchIntent(trimmed) && !registryStandardToolsOwnPrompt(
+        trimmed,
+        this.messages.map((message: A2uiMessage): string => message.content)
+      )) {
         try {
           const decision = await this.canaryModel().complete(deepSearchRouteDecisionPrompt(trimmed));
           autoDeep = deepSearchRouteDecisionFromModelText(decision) === 'deepsearch';
@@ -6287,6 +6542,10 @@ struct Index {
   }
 
   private async sendPrompt(): Promise<void> {
+    if (this.registryPeerConversationActive()) {
+      await this.sendRegistryPeerMessage();
+      return;
+    }
     await this.submitPrompt(this.inputText, this.inputText);
   }
 
@@ -8466,6 +8725,10 @@ struct Index {
 
   private async handleClientAction(action: A2uiAction): Promise<void> {
     aiLogInfo('[AIPhone][A2uiHomeClientAction] id=' + action.id);
+    if (action.id === 'registry.device.chat') {
+      this.openRegistryPeerConversation(action);
+      return;
+    }
     if (action.id === 'food_store_map_open') {
       const args = action.args as Record<string, Object | string | number | boolean | null | undefined> | undefined;
       if (args !== undefined && this.actionText(args['surfaceId']) === this.currentSurface.surfaceId &&
@@ -10746,11 +11009,11 @@ struct Index {
       Swiper(this.bimRootController) {
       HomePage({
         inputText: $inputText,
-        isBusy: this.isBusy,
+        isBusy: this.visibleConversationBusy(),
         showHistory: this.showHistory,
-        messages: this.messages,
+        messages: this.visibleConversationMessages(),
         currentSurface: this.currentSurface,
-        streamingAssistantDomText: this.streamingAssistantDomText,
+        streamingAssistantDomText: this.registryPeerConversationActive() ? '' : this.streamingAssistantDomText,
         streamingAssistantDomTick: this.streamingAssistantDomTick,
         htmlHomeHtml: this.htmlHomeHtmlForView(),
         foodStoreMapOpen: this.foodStoreMapOpen,
@@ -10773,7 +11036,8 @@ struct Index {
         inputPlaceholder: this.inputPlaceholder,
         isVoiceListening: this.isVoiceListening,
         voiceInputMessage: this.voiceInputMessage,
-        showWelcome: shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
+        showWelcome: !this.registryPeerConversationActive() &&
+          shouldShowWelcome(this.isBusy, this.messages.length, this.currentSurface),
         showCheckoutWeb: this.showCheckoutWeb,
         checkoutWebKind: this.checkoutWebKind,
         checkoutWebUrl: this.checkoutWebUrl,
@@ -10781,6 +11045,7 @@ struct Index {
         checkoutWebContext: this.checkoutWebContext,
         showTrainPresalePanel: this.showTrainPresalePanel,
         showDeepSearch: this.showDeepSearch,
+        registryPeerTitle: this.registryPeerTitle,
         deepSearchQuery: this.deepSearchQuery,
         deepSearchSettingsJson: this.deepSearchSettingsJson,
         deepSearchContextJson: this.deepSearchContextJson,
@@ -10811,6 +11076,9 @@ struct Index {
         },
         onResetSession: () => {
           this.resetCurrentSession();
+        },
+        onBackToMainConversation: () => {
+          this.closeRegistryPeerConversation();
         },
         onCloseFoodStoreMap: () => {
           this.foodStoreMapOpen = false;

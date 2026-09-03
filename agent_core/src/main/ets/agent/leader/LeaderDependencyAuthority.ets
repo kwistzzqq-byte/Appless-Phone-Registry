@@ -25,6 +25,11 @@ function dependencyContract(toolId: string): LeaderDependencyContract | null {
       sourceToolIds: ['gmail.mail.search']
     };
   }
+  if (toolId === 'registry.send') {
+    return {
+      sourceToolIds: ['registry.list']
+    };
+  }
   return null;
 }
 
@@ -200,6 +205,18 @@ function mailIdentityAuthorized(
     optionalIdentityAuthorized(messageId, refs);
 }
 
+function registrySendIdentityAuthorized(
+  values: Record<string, JsonValue | undefined>,
+  refs: Set<string>
+): boolean {
+  const keys: string[] = ['serviceId', 'target', 'peer', 'agentId'];
+  let serviceId: string = '';
+  for (let index = 0; index < keys.length && serviceId.length === 0; index++) {
+    serviceId = inputString(values, keys[index]);
+  }
+  return serviceId.length > 0 && refs.has(serviceId);
+}
+
 export function leaderInputHasEntityAuthority(
   toolId: string,
   input: Object,
@@ -242,6 +259,9 @@ export function leaderInputHasEntityAuthority(
   }
   if (toolId === 'gmail.thread.read') {
     return mailIdentityAuthorized(values, refs, true);
+  }
+  if (toolId === 'registry.send') {
+    return registrySendIdentityAuthorized(values, refs);
   }
   return false;
 }

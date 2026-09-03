@@ -1571,6 +1571,8 @@ function canaryPlanningContext(
         inputSchema: definition.inputSchema,
         outputSchema: definition.outputSchema,
         actions,
+        presentationMode: definition.toolId === 'registry.list' || definition.toolId === 'registry.send' ?
+          'conversation' : 'ui',
         planningHint: toolPlanningDescriptionForToolId(definition.toolId, allowTrustedOperationTargets)
       };
     }

@@ -530,6 +530,34 @@ function semanticPlanningContext(): LeaderPlanningContext {
   };
 }
 
+function conversationPresentationPlanningContext(): LeaderPlanningContext {
+  const context: LeaderPlanningContext = semanticPlanningContext();
+  context.tools.push({
+    toolId: 'registry.list',
+    domain: 'registry',
+    intent: 'registry.agents.list',
+    riskLevel: 'read',
+    registeredBackends: ['local_adapter'],
+    inputSchema: 'emptyObject',
+    outputSchema: 'genericToolResults',
+    actions: [],
+    presentationMode: 'conversation'
+  });
+  context.tools.push({
+    toolId: 'registry.send',
+    domain: 'registry',
+    intent: 'registry.agent.message.send',
+    riskLevel: 'read',
+    registeredBackends: ['local_adapter'],
+    inputSchema: 'registryAgentSendRequest',
+    outputSchema: 'genericToolResults',
+    actions: [],
+    presentationMode: 'conversation'
+  });
+  context.personas[0].activeSkills[0].toolIds.push('registry.list', 'registry.send');
+  return context;
+}
+
 function memoryPlanningContext(): LeaderPlanningContext {
   const context: LeaderPlanningContext = semanticPlanningContext();
   const ids: string[] = ['memory.remember', 'memory.update', 'memory.forget'];
@@ -1054,6 +1082,65 @@ export default function leaderAgentTest() {
       expect(error.taskId).assertEqual('input-1');
       expect((error.payload as TaskErrorPayload).code).assertEqual('LEADER_PLAN_INVALID');
       expect(planner.calls).assertEqual(1);
+      leader.stop();
+      observer.close();
+    });
+
+    it('returns conversation-presented tool results without publishing a UI task', 0, async () => {
+      const firstDecision = semanticDecision([
+        semanticDataTask('registry-list', 'registry.list')
+      ]);
+      const answerDecision = semanticDecision([], 'answer');
+      answerDecision.requestedCapabilityIds = ['registry.list'];
+      answerDecision.answer = 'phone1 当前在线。';
+      const planner = new RoundScriptedPlanner([firstDecision, answerDecision]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, conversationPresentationPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const dataTask = await receive(observer);
+      expect(dataTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      bus.publish(dataResultMessage(dataTask, 'phone1 当前在线。'));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const terminal = await receive(observer);
+
+      expect(terminal.type).assertEqual(AgentMessageType.TURN_RESULT);
+      expect((terminal.payload as TurnResultPayload).message).assertEqual('phone1 当前在线。');
+      expect((terminal.payload as TurnResultPayload).surfaceId === undefined).assertTrue();
+      expect(planner.calls).assertEqual(2);
+      leader.stop();
+      observer.close();
+    });
+
+    it('authorizes registry.send from an exact serviceId returned by registry.list', 0, async () => {
+      const listDecision = semanticDecision([
+        semanticDataTask('registry-list', 'registry.list')
+      ]);
+      const sendTask = semanticDataTask('registry-send', 'registry.send');
+      sendTask.input = JSON.parse('{"serviceId":"HW-Phone1","message":"列出可访问文件"}') as Object;
+      const planner = new RoundScriptedPlanner([listDecision, semanticDecision([sendTask])]);
+      const bus = new LinkedMessageBus();
+      const leader = new LeaderAgent(bus, planner, conversationPresentationPlanningContext());
+      const observer = bus.openReader();
+      leader.start();
+
+      bus.publish(inputMessage());
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.INPUT_USER);
+      const listTask = await receive(observer);
+      expect((listTask.payload as CreateDataTaskPayload).toolId).assertEqual('registry.list');
+      bus.publish(dataResultMessageWithEntityRefs(
+        listTask,
+        'HW-Phone1 is registered',
+        ['HW-Phone1']
+      ));
+      expect((await receive(observer)).type).assertEqual(AgentMessageType.TASK_RESULT_DATA);
+      const sendDataTask = await receive(observer);
+
+      expect(sendDataTask.type).assertEqual(AgentMessageType.TASK_CREATE_DATA);
+      expect((sendDataTask.payload as CreateDataTaskPayload).toolId).assertEqual('registry.send');
       leader.stop();
       observer.close();
     });

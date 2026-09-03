@@ -13,6 +13,7 @@ import {
 } from '@loop/agent-core';
 import { configurePersonaStoreFromRaw } from '../model/PersonaStore';
 import { loadProviderRuntimeConfig } from './ProviderRuntimeBootstrap';
+import { loadApplessRegistryRuntimeConfig } from './RegistryRuntimeBootstrap';
 import {
   BIM_SENTINEL_MOCK_EVENT,
   queueBimSentinelMockHandoff
@@ -379,6 +380,7 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     loadProviderRuntimeConfig(this.context, true);
+    loadApplessRegistryRuntimeConfig(this.context);
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
     this.claimTrainPresaleTask(want);
@@ -445,6 +447,7 @@ export default class EntryAbility extends UIAbility {
     const waterfallPrompt = waterfallConversationTypedTestPromptFromWant(want);
     const uri = oauthUriFromWant(want);
     loadProviderRuntimeConfig(this.context, !isComposioCallbackUri(uri));
+    loadApplessRegistryRuntimeConfig(this.context);
     this.loadPersonaPacks();
     this.handleOAuthWant(want);
     const result = this.claimTrainPresaleTask(want);

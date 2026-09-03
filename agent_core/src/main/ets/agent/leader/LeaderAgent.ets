@@ -85,6 +85,7 @@ interface LeaderTurnState {
   currentRoundAllowsUnboundContinuation: boolean;
   pendingDataTools: Map<string, LeaderPendingDataTask>;
   dataTaskIds: string[];
+  uiDataTaskIds: string[];
   expectedOutputSchema: string;
   uiIntent: string;
   originalUserInput: string;
@@ -333,6 +334,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       currentRoundAllowsUnboundContinuation: false,
       pendingDataTools: new Map<string, LeaderPendingDataTask>(),
       dataTaskIds: [],
+      uiDataTaskIds: [],
       expectedOutputSchema: '',
       uiIntent: '',
       originalUserInput: this.boundedText(inputText, UI_TASK_ORIGINAL_USER_INPUT_MAX_LENGTH),
@@ -631,7 +633,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     if (decision.roundAction === 'answer' || decision.roundAction === 'clarify') {
-      if (state.dataTaskIds.length > 0) {
+      if (state.uiDataTaskIds.length > 0) {
         state.pendingAnswer = decision.answer as string;
         state.uiIntent = decision.uiIntent.purpose;
         this.publishAccumulatedUiWithPendingAction(message, state);
@@ -642,20 +644,34 @@ export class LeaderAgent extends MessageDrivenAgent {
       return;
     }
     const dataTaskIds: string[] = this.decisionDataTaskIds(state, decision.dataTasks);
+    const uiDataTaskIds: string[] = [];
+    for (let index = 0; index < decision.dataTasks.length; index++) {
+      const metadata: LeaderToolMetadata = this.toolMetadata(
+        decision.dataTasks[index].toolId
+      ) as LeaderToolMetadata;
+      if (metadata.presentationMode !== 'conversation') {
+        uiDataTaskIds.push(dataTaskIds[index]);
+      }
+    }
     let uiTaskId: string = state.inputTaskId + ':round-' + state.round.toString() + ':virtual';
     if (dataTaskIds.length > 0) {
       state.currentRoundAllDataSucceeded = true;
       state.currentRoundRequiresPlanning =
         decision.reasonCode === 'dependency_requires_next_round' ||
-        decision.reasonCode === 'sequence_requires_next_round';
+        decision.reasonCode === 'sequence_requires_next_round' ||
+        uiDataTaskIds.length !== dataTaskIds.length;
       state.currentRoundAllowsUnboundContinuation =
         decision.reasonCode === 'sequence_requires_next_round';
       uiTaskId = state.uiTaskId;
       for (let index = 0; index < dataTaskIds.length; index++) {
         state.dataTaskIds.push(dataTaskIds[index]);
       }
-      if (state.expectedOutputSchema.length === 0) {
-        const first: LeaderDecisionDataTask = decision.dataTasks[0];
+      for (let index = 0; index < uiDataTaskIds.length; index++) {
+        state.uiDataTaskIds.push(uiDataTaskIds[index]);
+      }
+      if (state.expectedOutputSchema.length === 0 && uiDataTaskIds.length > 0) {
+        const firstUiTaskIndex: number = dataTaskIds.indexOf(uiDataTaskIds[0]);
+        const first: LeaderDecisionDataTask = decision.dataTasks[firstUiTaskIndex];
         state.expectedOutputSchema = (this.toolMetadata(first.toolId) as LeaderToolMetadata).outputSchema;
       }
       state.uiIntent = decision.uiIntent.purpose;
@@ -882,7 +898,7 @@ export class LeaderAgent extends MessageDrivenAgent {
 
   private canRenderObservedFallback(state: LeaderTurnState): boolean {
     return state.semantic &&
-      state.dataTaskIds.length > 0 &&
+      state.uiDataTaskIds.length > 0 &&
       state.turnObservations.length > 0 &&
       state.pendingDataTools.size === 0 &&
       state.pendingAnswer === null &&
@@ -1975,7 +1991,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   ): void {
     const payload: CreateUiTaskPayload = {
       taskId: state.uiTaskId,
-      dataTaskIds: state.dataTaskIds.slice(),
+      dataTaskIds: state.uiDataTaskIds.slice(),
       skillId: state.skillId,
       intent: state.uiIntent,
       originalUserInput: state.originalUserInput,
@@ -2298,6 +2314,7 @@ export class LeaderAgent extends MessageDrivenAgent {
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
         actions: tool.actions.slice(),
+        presentationMode: tool.presentationMode,
         planningHint: tool.planningHint
       });
     }

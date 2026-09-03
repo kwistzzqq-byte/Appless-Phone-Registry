@@ -127,6 +127,7 @@ import bimRuntimeTest from './BimRuntime.test';
 import bimDailyReminderTest from './BimDailyReminder.test';
 import bimHomePageTest from './BimHomePage.test';
 import capabilityRuntimeTest from './CapabilityRuntime.test';
+import applessRegistryA2aTest from './ApplessRegistryA2a.test';
 import publicPersonaTest from './PublicPersona.test';
 import dailyBriefCoreTest from './DailyBriefCore.test';
 import dailyBriefStoreTest from './DailyBriefStore.test';
@@ -273,6 +274,7 @@ export default function testsuite() {
   htmlHomeActionPolicyTest();
   foodStoreMapTest();
   capabilityRuntimeTest();
+  applessRegistryA2aTest();
   publicPersonaTest();
   dailyBriefCoreTest();
   dailyBriefStoreTest();

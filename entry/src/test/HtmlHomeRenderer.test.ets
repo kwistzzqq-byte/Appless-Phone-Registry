@@ -369,6 +369,35 @@ function dynamicCredentialDocumentFixture(): HtmlHomeDocument {
   return doc;
 }
 
+function registryDevicesDocumentFixture(): HtmlHomeDocument {
+  const doc = documentFixture();
+  doc.source = 'tool';
+  doc.kind = 'generic';
+  doc.title = '注册中心在线状态';
+  doc.subtitle = '当前实时在线设备';
+  doc.timeline = [];
+  doc.history = [];
+  doc.blocks = [{
+    id: 'registry-status',
+    kind: 'generic-tool-result',
+    title: '注册中心在线状态',
+    subtitle: 'Tunnel 当前连接设备 3 个',
+    status: 'success',
+    metrics: [
+      { label: 'source', value: 'Appless Agent Registry' },
+      { label: 'toolName', value: 'registry.status' }
+    ],
+    rows: [
+      { label: '连接设备', value: '3' },
+      { label: '在线设备 1', value: 'Appless-Phone1' },
+      { label: '在线设备 2', value: 'HW-Phone1' },
+      { label: '在线设备 3', value: 'JiuwenSwarm-Mac' }
+    ],
+    actions: []
+  }];
+  return doc;
+}
+
 function firecrawlDocumentFixture(toolName: string = 'web.research.search'): HtmlHomeDocument {
   const doc = documentFixture();
   const monitorConfirmArgs = JSON.parse(
@@ -2263,6 +2292,46 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('Project Brief')).assertLarger(-1);
       expect(html.indexOf('Known Block')).assertLarger(-1);
       expect(html.indexOf('Run Action')).assertLarger(-1);
+    });
+
+    it('renders registry.status as an embedded responsive online-device surface', 0, () => {
+      const html = renderHtmlHomeDocument(registryDevicesDocumentFixture());
+
+      expect(html.indexOf('registry-shell')).assertLarger(-1);
+      expect(html.indexOf('注册中心返回的设备列表')).assertLarger(-1);
+      expect(html.indexOf('Appless-Phone1')).assertLarger(-1);
+      expect(html.indexOf('HW-Phone1')).assertLarger(-1);
+      expect(html.indexOf('JiuwenSwarm-Mac')).assertLarger(-1);
+      expect(html.indexOf('AIPhoneHome.postAction')).assertLarger(-1);
+      expect(html.indexOf('width:min(100%,760px)')).assertLarger(-1);
+      expect(html.indexOf('data-chat-target')).assertLarger(-1);
+      expect(html.indexOf("kind:'client'")).assertLarger(-1);
+      expect(html.indexOf("prompt:''")).assertLarger(-1);
+      expect(html.indexOf('registry-devices-data')).assertEqual(-1);
+      expect(html.indexOf('scope-pill')).assertEqual(-1);
+      expect(html.indexOf('手机执行器')).assertEqual(-1);
+      expect(html.indexOf('桌面编排')).assertEqual(-1);
+      expect(html.indexOf('桌面代理')).assertEqual(-1);
+      expect(html.indexOf('rawPreview')).assertEqual(-1);
+    });
+
+    it('reuses the plain chat shell for an empty registry peer conversation', 0, () => {
+      const doc = documentFixture();
+      doc.surfaceId = 'registry-peer-HW-Phone1';
+      doc.source = 'model';
+      doc.kind = 'generic';
+      doc.title = 'HW-Phone1';
+      doc.subtitle = '';
+      doc.timeline = [];
+      doc.blocks = [];
+      doc.history = [];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(isHtmlHomeConversationDocument(html)).assertTrue();
+      expect(html.indexOf("'和 ' + (peerName || 'Appless') + ' 聊聊'")).assertLarger(-1);
+      expect(html.indexOf('消息由注册中心直接转发')).assertLarger(-1);
+      expect(html.indexOf('emptyAssistantTurn.hidden = true')).assertLarger(-1);
+      expect(html.indexOf('assistantTurn.hidden = false')).assertLarger(-1);
     });
 
     it('escapes dangerous script text in embedded JSON', 0, () => {

@@ -484,6 +484,7 @@ export class MultiAgentRuntime {
   private readonly surfaceTurnActivator: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly turnGenerationObserver: ((turnId: string, hostGeneration: number) => void) | null;
   private readonly directActionAdmission: ((action: A2uiAction, context: ActionExecutionContext) => boolean) | null;
+  private readonly conversationToolIds: Set<string> = new Set<string>();
   private readonly leader: LeaderAgent;
   private readonly planningContextProvider: ((prompt: string) => LeaderPlanningContext) | null;
   private readonly data: DataAgent;
@@ -514,6 +515,7 @@ export class MultiAgentRuntime {
       null : options.turnGenerationObserver;
     this.directActionAdmission = options.directActionAdmission === undefined ?
       null : options.directActionAdmission;
+    this.updateConversationToolIds(options.planningContext);
     this.leader = new LeaderAgent(
       this.bus,
       options.planner,
@@ -565,7 +567,12 @@ export class MultiAgentRuntime {
       this.ownedActionExecutor = null;
       actionExecutor = options.actionExecutor;
     }
-    this.ui = new UiAgent(this.bus, uiRenderer, options.surfaceWriter);
+    this.ui = new UiAgent(
+      this.bus,
+      uiRenderer,
+      options.surfaceWriter,
+      (toolId: string): boolean => !this.conversationToolIds.has(toolId)
+    );
     this.action = new ActionAgent(
       this.bus,
       options.actionCatalog,
@@ -599,6 +606,7 @@ export class MultiAgentRuntime {
     if (contextProvider !== null) {
       try {
         const planningContext = contextProvider(prompt);
+        this.updateConversationToolIds(planningContext);
         this.leader.updatePlanningContext(planningContext);
       } catch (_error) {
         return Promise.resolve(settled('error', 'Multi-agent planning context refresh failed.'));
@@ -652,6 +660,16 @@ export class MultiAgentRuntime {
         payload
       });
     });
+  }
+
+  private updateConversationToolIds(context: LeaderPlanningContext): void {
+    this.conversationToolIds.clear();
+    for (let index = 0; index < context.tools.length; index++) {
+      const tool = context.tools[index];
+      if (tool.presentationMode === 'conversation') {
+        this.conversationToolIds.add(tool.toolId);
+      }
+    }
   }
 
   runAction(

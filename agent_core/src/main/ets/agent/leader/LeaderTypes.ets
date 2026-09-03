@@ -238,6 +238,7 @@ export interface LeaderToolMetadata {
   inputSchema: string;
   outputSchema: string;
   actions: string[];
+  presentationMode?: 'ui' | 'conversation';
   planningHint?: string;
 }
 

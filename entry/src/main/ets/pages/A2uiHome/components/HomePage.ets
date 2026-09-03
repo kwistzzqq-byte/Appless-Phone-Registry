@@ -265,6 +265,7 @@ export struct HomePage {
   @Prop bimRememberError: string = '';
   @Prop reduceMotion: boolean = false;
   @Prop showDeepSearch: boolean = false;
+  @Prop registryPeerTitle: string = '';
   @Prop @Watch('onDeepSearchQueryChanged') deepSearchQuery: string = '';
   @Prop deepSearchSettingsJson: string = '';
   @Prop deepSearchContextJson: string = '';
@@ -293,6 +294,7 @@ export struct HomePage {
   onStartVoiceInput: () => void = () => {};
   onStopVoiceInput: () => void = () => {};
   onResetSession: () => void = () => {};
+  onBackToMainConversation: () => void = () => {};
   onCloseFoodStoreMap: () => void = () => {};
   onFoodStoreMapLocationConfirm: (longitude: number, latitude: number, name: string, address: string) => void =
     (_longitude: number, _latitude: number, _name: string, _address: string): void => {};
@@ -738,7 +740,48 @@ export struct HomePage {
 
       Column() {
         if (shouldShowHomeChrome(this.waterfallFullscreen)) {
-        if (this.showWelcome) {
+        if (this.registryPeerTitle.length > 0) {
+          Row() {
+            Button('‹ 返回主对话')
+              .height(38)
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(COLOR_TEXT)
+              .padding({ left: 13, right: 13 })
+              .backgroundColor(A2UI_HOME_HEADER_BUTTON_BACKGROUND)
+              .border({ width: 1, color: A2UI_HOME_HEADER_BUTTON_EDGE })
+              .borderRadius(19)
+              .shadow({
+                radius: 8,
+                color: A2UI_HOME_HEADER_BUTTON_SHADOW,
+                offsetX: 0,
+                offsetY: 3
+              })
+              .onClick(() => {
+                this.onBackToMainConversation();
+              })
+
+            Column() {
+              Text(this.registryPeerTitle)
+                .fontSize(16)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(COLOR_TEXT)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text('在线 · 注册中心')
+                .fontSize(11)
+                .fontColor(COLOR_MUTED)
+                .margin({ top: 1 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.End)
+            .margin({ left: 10 })
+          }
+          .width('100%')
+          .height(44)
+          .alignItems(VerticalAlign.Center)
+          .margin({ bottom: A2UI_HOME_SECTION_GAP })
+        } else if (this.showWelcome) {
           this.WelcomeToolbar()
         } else {
           Row() {
@@ -880,7 +923,7 @@ export struct HomePage {
         }
         .layoutWeight(1)
         .margin({ top: this.surfaceTopGap() })
-      } else if (!this.showDeepSearch && this.useNativeSurface()) {
+      } else if (this.registryPeerTitle.length === 0 && !this.showDeepSearch && this.useNativeSurface()) {
         A2uiSurfaceView({
           surface: this.currentSurface,
           renderTick: this.surfaceRenderTick,

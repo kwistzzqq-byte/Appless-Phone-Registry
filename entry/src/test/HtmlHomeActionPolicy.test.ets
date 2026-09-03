@@ -203,6 +203,31 @@ function hotelActionDocumentFixture(): HtmlHomeDocument {
 
 export default function htmlHomeActionPolicyTest() {
   describe('htmlHomeActionPolicy', () => {
+    it('opens peer chat only for a device present on the current registry status surface', 0, () => {
+      const doc = documentFixture();
+      doc.kind = 'generic';
+      doc.blocks = [{
+        id: 'registry-status',
+        kind: 'generic-tool-result',
+        title: '注册中心在线状态',
+        subtitle: '',
+        status: 'success',
+        metrics: [{ label: 'toolName', value: 'registry.status' }],
+        rows: [{ label: '在线设备 1', value: 'HW-Phone1' }],
+        actions: []
+      }];
+      const allowed = action('registry.device.chat', '', 'client',
+        JSON.parse('{"serviceId":"HW-Phone1"}') as Object);
+      const offline = action('registry.device.chat', '', 'client',
+        JSON.parse('{"serviceId":"JiuwenSwarm-Mac"}') as Object);
+      const promptRouted = action('registry.device.chat', '和 HW-Phone1 对话', 'prompt',
+        JSON.parse('{"serviceId":"HW-Phone1"}') as Object);
+
+      expect(isHtmlHomeActionAllowed(doc, allowed)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, offline)).assertFalse();
+      expect(isHtmlHomeActionAllowed(doc, promptRouted)).assertFalse();
+    });
+
     it('allows exact daily brief snapshot actions', 0, () => {
       const doc = documentFixture();
       doc.kind = JSON.parse('"daily-brief"') as HtmlHomeKind;

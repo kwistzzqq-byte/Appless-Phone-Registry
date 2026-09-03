@@ -565,6 +565,46 @@ async function settle(): Promise<void> {
 
 export default function uiAgentTest() {
   describe('uiAgent', () => {
+    it('does not create a surface for conversation-presented Data tools', 0, async () => {
+      const bus = new LinkedMessageBus();
+      const renderer = new RecordingRenderer();
+      const writer = new RecordingSurfaceWriter();
+      const agent = new UiAgent(
+        bus,
+        renderer,
+        writer,
+        (toolId: string): boolean => toolId !== 'registry.list'
+      );
+      agent.start();
+      const task = semanticDataTaskMessage('input-headless:round-1:registry', 1);
+      const payload = task.payload as CreateDataTaskPayload;
+      payload.toolId = 'registry.list';
+      payload.allowedToolIds = ['registry.list'];
+      payload.outputSchema = 'genericToolResults';
+      bus.publish(task);
+      await settle();
+      const result: DataResult = {
+        toolId: 'registry.list',
+        outputSchema: 'genericToolResults',
+        status: 'success',
+        sources: [],
+        data: JSON.parse('{"summary":"phone1 当前在线。","entityRefs":[]}') as Object,
+        warnings: []
+      };
+      bus.publish(turnMessage(
+        AgentMessageType.TASK_RESULT_DATA,
+        task.conversationId,
+        task.turnId,
+        task.taskId,
+        result
+      ));
+      await settle();
+
+      expect(writer.writes.length).assertEqual(0);
+      expect(renderer.calls.length).assertEqual(0);
+      agent.stop();
+    });
+
     it('serializes renderer progress before the final surface write', 0, async () => {
       const bus = new LinkedMessageBus();
       const renderer = new ProgressiveResultRenderer();

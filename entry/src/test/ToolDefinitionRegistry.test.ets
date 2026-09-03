@@ -77,12 +77,15 @@ export default function toolDefinitionRegistryTest() {
         'travel.search,train.search,flight.search,hotel.search,hotel.detail,hotel.navigate,' +
         'hotel.booking.open,food.search,luckin.order.preview,luckin.order.create,luckin.order.status,' +
         'media.aggregate.search,ride.estimate,ride.app.link,ride.order.create,ride.order.cancel,' +
-        'ride.driver.location,web.research.search,web.page.read'
+        'ride.driver.location,web.research.search,web.page.read,registry.list,registry.status,registry.send'
       );
       expect(isRegisteredAiphoneToolId('maps.place.search')).assertFalse();
       expect(isRegisteredAiphoneToolId('maps.place.details')).assertFalse();
       expect(isRegisteredAiphoneToolId('maps.route.open')).assertFalse();
       expect(isRegisteredAiphoneToolId('ride.estimate')).assertTrue();
+      expect(isRegisteredAiphoneToolId('registry.list')).assertTrue();
+      expect(isRegisteredAiphoneToolId('registry.status')).assertTrue();
+      expect(isRegisteredAiphoneToolId('registry.send')).assertTrue();
       expect(isRegisteredAiphoneToolId('payment.send')).assertFalse();
       expect(isRegisteredAiphoneToolId('dynamic.search')).assertFalse();
       expect(isRegisteredAiphoneToolId('memory.update')).assertFalse();
@@ -713,10 +716,10 @@ export default function toolDefinitionRegistryTest() {
       const action: ToolDefinition[] = actionAgentToolDefinitions();
       const ids: string[] = data.concat(action).map((item: ToolDefinition): string => item.toolId);
 
-      expect(all.length).assertEqual(55);
-      expect(data.length).assertEqual(31);
+      expect(all.length).assertEqual(58);
+      expect(data.length).assertEqual(34);
       expect(action.length).assertEqual(24);
-      expect(new Set<string>(ids).size).assertEqual(55);
+      expect(new Set<string>(ids).size).assertEqual(58);
       expect(all.filter((item: ToolDefinition): boolean => item.riskLevel === 'blocked').length)
         .assertEqual(0);
       expect(ids.indexOf('hotel.navigate') >= 0).assertTrue();

@@ -13,6 +13,10 @@ import { renderFirecrawlHomeDocument, shouldRenderFirecrawlHomeDocument } from '
 import { renderHotelHomeDocument, shouldRenderHotelHomeDocument } from './HtmlHotelHomeRenderer';
 import { renderMediaHomeDocument, shouldRenderMediaHomeDocument } from './HtmlMediaHomeRenderer';
 import { renderPaymentHomeDocument, shouldRenderPaymentHomeDocument } from './HtmlPaymentHomeRenderer';
+import {
+  renderRegistryDevicesHomeDocument,
+  shouldRenderRegistryDevicesHomeDocument
+} from './HtmlRegistryDevicesHomeRenderer';
 import { renderRideHailingHomeDocument, shouldRenderRideHailingHomeDocument } from './HtmlRideHailingHomeRenderer';
 import { renderTravelHomeDocument, shouldRenderTravelHomeDocument } from './HtmlTravelHomeRenderer';
 import { personaAvatarDataUri } from './PersonaAvatarDataUri';
@@ -3819,12 +3823,15 @@ const HTML_HOME_JS: string = `
     }
     return null;
   }
+  function registryPeerName() {
+    return text(data.surfaceId).indexOf('registry-peer-') === 0 ? text(data.title).trim() : '';
+  }
   function isPlainChatScene(blocks, timeline, history) {
     return scene === 'generic' &&
       text(data.source) === 'model' &&
       blocks.length === 0 &&
       timeline.length === 0 &&
-      latestAssistant(history) !== null;
+      (latestAssistant(history) !== null || registryPeerName().length > 0);
   }
   function deepSearchStageLabel(value) {
     var state = text(value).toLowerCase();
@@ -3955,7 +3962,7 @@ const HTML_HOME_JS: string = `
       var role = text(item && item.role) === 'assistant' ? 'assistant' : 'user';
       var roleClass = role === 'assistant' ? 'plain-chat-role-assistant' : 'plain-chat-role-user';
       var turn = add(timelineWrap, 'article', 'plain-chat-turn ' + roleClass);
-      add(turn, 'div', 'plain-chat-role', role === 'assistant' ? 'Appless' : '你');
+      add(turn, 'div', 'plain-chat-role', role === 'assistant' ? (registryPeerName() || 'Appless') : '你');
       add(turn, 'p', 'plain-chat-turn-copy', text(item && item.content));
     });
   }
@@ -3969,13 +3976,20 @@ const HTML_HOME_JS: string = `
   }
   function addPlainChatAssistantIdentity(parent) {
     var identity = add(parent, 'div', 'plain-chat-assistant-identity');
-    add(identity, 'div', 'plain-chat-assistant-mark', 'A');
+    var peerName = registryPeerName();
+    add(identity, 'div', 'plain-chat-assistant-mark', peerName.length > 0 ? peerName.charAt(0).toUpperCase() : 'A');
   }
   function addPlainChat(parent, history) {
     var assistant = latestAssistant(history);
-    if (!assistant) { return; }
     var currentUser = latestUserBefore(history, assistant);
     var section = add(parent, 'section', 'section plain-chat');
+    if (!assistant) {
+      var emptyAssistantTurn = add(section, 'div', 'plain-chat-assistant-turn');
+      emptyAssistantTurn.hidden = true;
+      addPlainChatAssistantIdentity(emptyAssistantTurn);
+      add(emptyAssistantTurn, 'article', 'plain-chat-response');
+      return;
+    }
     if (currentUser) {
       var userMessage = add(section, 'article', 'plain-chat-user-message');
       add(userMessage, 'span', 'plain-chat-user-role', '你');
@@ -4011,8 +4025,9 @@ const HTML_HOME_JS: string = `
   }
   function addConversationHero(parent) {
     var hero = add(parent, 'header', 'hero plain-chat-hero');
-    add(hero, 'h1', '', '和 Appless 聊聊');
-    add(hero, 'p', 'subtitle', '回答优先，历史内容按需展开');
+    var peerName = registryPeerName();
+    add(hero, 'h1', '', '和 ' + (peerName || 'Appless') + ' 聊聊');
+    add(hero, 'p', 'subtitle', peerName.length > 0 ? '消息由注册中心直接转发' : '回答优先，历史内容按需展开');
   }
   function addThinkingScene(parent, timeline, history) {
     var section = add(parent, 'section', 'section plain-chat thinking-chat');
@@ -4214,6 +4229,7 @@ const HTML_HOME_JS: string = `
       scene = previousScene;
       return false;
     }
+    assistantTurn.hidden = false;
     var currentUser = thinking ? null : latestUserBefore(history, assistant);
     var requestText = thinking ? thinkingRequest(timeline, history) : text(currentUser && currentUser.content);
     var userText = ensurePlainChatUser(section, assistantTurn);
@@ -6571,6 +6587,9 @@ export function renderHtmlHomeDocument(
   if (shouldRenderMultiTaskHomeDocument(document)) {
     return renderMultiTaskHomeDocument(document, isBusy);
   }
+  if (shouldRenderRegistryDevicesHomeDocument(document)) {
+    return renderRegistryDevicesHomeDocument(document, isBusy);
+  }
   if (shouldRenderFirecrawlHomeDocument(document)) {
     return renderFirecrawlHomeDocument(document, isBusy);
   }
@@ -6603,6 +6622,7 @@ export function renderHtmlHomeDocument(
   }
   const renderDocument: HtmlHomeDocumentWithBusy = {
     version: document.version,
+    surfaceId: document.surfaceId,
     source: document.source,
     kind: document.kind,
     title: document.title,
@@ -6626,9 +6646,11 @@ export function renderHtmlHomeDocument(
   const enhancedScene: boolean = document.kind === 'gmail' || document.kind === 'social' || document.kind === 'luckin';
   const bodyScene = enhancedScene ? ` data-scene="${escapeHtmlText(document.kind)}"` : '';
   const conversationThinking: boolean = document.kind === 'thinking' || document.source === 'pending';
+  const registryPeerConversation: boolean = (document.surfaceId ?? '').startsWith('registry-peer-');
   const conversationReady: boolean = document.kind === 'generic' && document.source === 'model' &&
     document.blocks.length === 0 && document.timeline.length === 0 &&
-    document.history.some((item) => item.role === 'assistant' && item.content.trim().length > 0);
+    (registryPeerConversation ||
+      document.history.some((item) => item.role === 'assistant' && item.content.trim().length > 0));
   const bodyView = conversationThinking ? ' data-view="conversation-thinking"' :
     (conversationReady ? ' data-view="conversation"' : '');
   const bodyUserMotion = conversationThinking && animateLatestUser ? ' data-user-motion="enter"' : '';

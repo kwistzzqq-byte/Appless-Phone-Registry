@@ -667,6 +667,42 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: 'genericToolResults',
     a2uiComponent: 'GenericToolResults',
     actions: ['web.monitor.detail', 'web.monitor.checks', 'web.monitor.run', 'web.monitor.pause', 'web.monitor.resume', 'web.monitor.delete']
+  },
+  {
+    toolId: 'registry.list',
+    domain: 'registry',
+    intent: 'registry.agents.list',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['none'],
+    inputSchema: 'emptyObject',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
+    toolId: 'registry.status',
+    domain: 'registry',
+    intent: 'registry.tunnel.status',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['none'],
+    inputSchema: 'emptyObject',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
+    toolId: 'registry.send',
+    domain: 'registry',
+    intent: 'registry.agent.message.send',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['none'],
+    inputSchema: 'registryAgentSendRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
   }
 ];
 
@@ -689,7 +725,10 @@ const RELEASE_TOOL_IDS: string[] = [
   'ride.order.cancel',
   'ride.driver.location',
   'web.research.search',
-  'web.page.read'
+  'web.page.read',
+  'registry.list',
+  'registry.status',
+  'registry.send'
 ];
 
 export function isReleaseToolId(toolId: string): boolean {
@@ -758,6 +797,12 @@ export function toolPlanningDescriptionForToolId(
     description += '. Use for general train/flight travel options. Before selecting execute, the query must contain an exact departure date, origin, and destination grounded in the current message or standard conversation context. If any is missing or ambiguous, select clarify and ask the user in your own words instead of calling the tool. Do not use for ferry or boat tickets; use dynamic.search for those unsupported transport domains.';
   } else if (definition.toolId === 'time') {
     description += '. Use only when the current device date or time is explicitly required. Input must be {}. It reads the device clock and never calls a network provider.';
+  } else if (definition.toolId === 'registry.list') {
+    description += '. Use when the user asks which Agents, services, devices, or peers are registered in the Agent Registry. Input must be {}. This returns registration records, not proof that every Agent is currently online.';
+  } else if (definition.toolId === 'registry.status') {
+    description += '. Use when the user asks whether the Registry, Tunnel, devices, services, or previously listed Agents are online or connected. Input must be {}. Report the aggregate connected-device, bound-service, and pending-request counts exactly; do not invent per-Agent online state.';
+  } else if (definition.toolId === 'registry.send') {
+    description += '. Use when the user asks a specific registered Agent to answer, handle, receive, or perform a task through A2A. Input must contain exact serviceId and message. Resolve serviceId from registry.list results or standard conversation context; preserve the full task and output requirement in message. Do not use for ordinary local Appless questions.';
   } else if (definition.toolId === 'train.search') {
     description += '. Use for railway, high-speed rail, bullet train, station-to-station, 12306, or train schedule requests. Before selecting execute, require an exact departure date, origin, and destination grounded in the standard conversation context; otherwise select clarify and ask naturally.';
   } else if (definition.toolId === 'flight.search') {

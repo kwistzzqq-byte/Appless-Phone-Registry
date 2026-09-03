@@ -113,13 +113,22 @@ export class UiAgent extends MessageDrivenAgent {
   private readonly contexts: Map<string, UiTurnContext> = new Map<string, UiTurnContext>();
   private readonly terminated: Set<string> = new Set<string>();
   private readonly terminatedOrder: string[] = [];
+  private readonly conversationDataTaskIds: Set<string> = new Set<string>();
+  private readonly shouldRenderTool: (toolId: string) => boolean;
   private surfaceSuffix: number = 0;
 
-  constructor(bus: LinkedMessageBus, renderer: UiTaskRenderer, writer: UiSurfaceWriter) {
+  constructor(
+    bus: LinkedMessageBus,
+    renderer: UiTaskRenderer,
+    writer: UiSurfaceWriter,
+    shouldRenderTool?: (toolId: string) => boolean
+  ) {
     super(bus);
     this.bus = bus;
     this.renderer = renderer;
     this.writer = writer;
+    this.shouldRenderTool = shouldRenderTool === undefined ? (_toolId: string): boolean => true :
+      shouldRenderTool;
   }
 
   stop(): void {
@@ -130,6 +139,7 @@ export class UiAgent extends MessageDrivenAgent {
     this.contexts.clear();
     this.terminated.clear();
     this.terminatedOrder.splice(0, this.terminatedOrder.length);
+    this.conversationDataTaskIds.clear();
   }
 
   surfaceReplaced(conversationId: string, turnId: string, surfaceId: string): void {
@@ -182,7 +192,14 @@ export class UiAgent extends MessageDrivenAgent {
     }
     if (message.type === AgentMessageType.TASK_CREATE_DATA) {
       const task: CreateDataTaskPayload | null = this.semanticDataTask(message.payload, message.taskId);
-      if (task === null || this.uiTaskIdForDataTask(task) === '') {
+      if (task === null) {
+        return;
+      }
+      if (!this.shouldRenderTool(task.toolId)) {
+        this.conversationDataTaskIds.add(message.taskId);
+        return;
+      }
+      if (this.uiTaskIdForDataTask(task) === '') {
         return;
       }
       const context: UiTurnContext = this.contextFor(message, key);
@@ -193,6 +210,22 @@ export class UiAgent extends MessageDrivenAgent {
       message.type === AgentMessageType.TASK_RESULT_DATA_PARTIAL ||
       message.type === AgentMessageType.ACTION_OFFERS_READY ||
       message.type === AgentMessageType.TASK_ERROR) {
+      const payload = message.payload as Record<string, Object | string | number | boolean | null | undefined>;
+      const resultToolId = payload === null || typeof payload !== 'object' || Array.isArray(payload) ?
+        undefined : payload['toolId'];
+      const offerToolId = payload === null || typeof payload !== 'object' || Array.isArray(payload) ?
+        undefined : payload['sourceToolId'];
+      const conversationResult: boolean = typeof resultToolId === 'string' &&
+        !this.shouldRenderTool(resultToolId);
+      const conversationOffers: boolean = typeof offerToolId === 'string' &&
+        !this.shouldRenderTool(offerToolId);
+      if (conversationResult || conversationOffers || this.conversationDataTaskIds.has(message.taskId)) {
+        if (message.type === AgentMessageType.TASK_RESULT_DATA ||
+          message.type === AgentMessageType.TASK_ERROR) {
+          this.conversationDataTaskIds.delete(message.taskId);
+        }
+        return;
+      }
       const current: UiTurnContext | undefined = this.contexts.get(key);
       const context: UiTurnContext = current === undefined ? this.contextFor(message, key) : current;
       this.enqueue(message, key, context);

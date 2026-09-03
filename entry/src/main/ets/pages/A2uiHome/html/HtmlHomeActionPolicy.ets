@@ -1,5 +1,5 @@
 import { A2uiAction } from '@loop/agent-core';
-import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument } from './HtmlHomeTypes';
+import { HtmlHomeAction, HtmlHomeBlock, HtmlHomeDocument, HtmlHomeMetric } from './HtmlHomeTypes';
 
 type HtmlHomePolicyValue = Object | string | number | boolean | null | undefined;
 
@@ -117,6 +117,9 @@ function isHtmlHomeActionAllowedInDocument(document: HtmlHomeDocument, action: A
   if (action.id.length === 0) {
     return false;
   }
+  if (action.id === 'registry.device.chat') {
+    return registryDeviceChatAllowedInDocument(document, action);
+  }
   if (action.id === 'memory_candidates_forget') {
     return memoryCandidatesForgetAllowedInDocument(document, action);
   }
@@ -200,6 +203,36 @@ function isHtmlHomeActionAllowedInDocument(document: HtmlHomeDocument, action: A
   }
   if (luckinPaymentPageAllowed(document, action)) {
     return true;
+  }
+  return false;
+}
+
+function registryDeviceChatAllowedInDocument(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (action.kind !== 'client' || action.prompt !== '' || action.args === undefined ||
+    action.args === null || typeof action.args !== 'object' || Array.isArray(action.args)) {
+    return false;
+  }
+  const args = action.args as Record<string, HtmlHomePolicyValue>;
+  if (Object.keys(args).sort().join(',') !== 'serviceId') {
+    return false;
+  }
+  const serviceId = policyText(args['serviceId']).trim();
+  if (serviceId.length === 0 || serviceId.length > 256) {
+    return false;
+  }
+  for (let blockIndex = 0; blockIndex < document.blocks.length; blockIndex++) {
+    const block = document.blocks[blockIndex];
+    if (block.kind !== 'generic-tool-result') continue;
+    const metrics = block.metrics.concat(block.rows);
+    const registryStatus = metrics.some((metric: HtmlHomeMetric): boolean =>
+      metric.label.toLowerCase() === 'toolname' && metric.value.trim() === 'registry.status');
+    if (!registryStatus) continue;
+    for (let rowIndex = 0; rowIndex < block.rows.length; rowIndex++) {
+      const row = block.rows[rowIndex];
+      if (row.label.indexOf('在线设备 ') === 0 && row.value.trim() === serviceId) {
+        return true;
+      }
+    }
   }
   return false;
 }
