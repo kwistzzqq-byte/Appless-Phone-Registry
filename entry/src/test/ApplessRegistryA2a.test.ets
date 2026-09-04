@@ -17,7 +17,8 @@ import {
   parseRegistryAgentReply,
   parseRegistryTunnelStatusResponse,
   registryA2aRequestJson,
-  registryPeerChatRequestJson
+  registryPeerChatRequestJson,
+  visibleRegistryPeerReplyText
 } from '../main/ets/registry/ApplessRegistryOutboundClient';
 import {
   isApplessRegistryToolId,
@@ -296,6 +297,16 @@ export default function applessRegistryA2aTest(): void {
         '{"kind":"text","text":"remote model unavailable"}]}}}}', 'HW-PC1');
       expect(failed.state).assertEqual('failed');
       expect(failed.text).assertEqual('remote model unavailable');
+    });
+
+    it('shows a real peer answer while suppressing delivery receipts', 0, () => {
+      expect(visibleRegistryPeerReplyText('DELIVERED')).assertEqual('');
+      expect(visibleRegistryPeerReplyText(
+        'DELIVERED report.pdf 12 bytes sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'))
+        .assertEqual('');
+      expect(visibleRegistryPeerReplyText('你好！有什么需要我帮你处理的吗？'))
+        .assertEqual('你好！有什么需要我帮你处理的吗？');
+      expect(visibleRegistryPeerReplyText('  收到，我来看看。  ')).assertEqual('收到，我来看看。');
     });
 
     it('exposes Registry operations as standard Agent tools', 0, () => {

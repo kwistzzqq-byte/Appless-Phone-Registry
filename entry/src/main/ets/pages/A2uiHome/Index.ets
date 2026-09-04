@@ -507,7 +507,8 @@ import { applessRegistryConfig, ApplessRegistryConfig } from '../../registry/App
 import { ApplessTunnelClient } from '../../registry/ApplessTunnelClient';
 import {
   RegistryAgentReply,
-  sendRegistryPeerChatMessage
+  sendRegistryPeerChatMessage,
+  visibleRegistryPeerReplyText
 } from '../../registry/ApplessRegistryOutboundClient';
 import {
   executeApplessRegistryTool,
@@ -5792,6 +5793,10 @@ struct Index {
         applessRegistryConfig(), serviceId, message);
       if (reply.state !== 'completed') {
         throw new Error(reply.text);
+      }
+      const visibleReply = visibleRegistryPeerReplyText(reply.text);
+      if (visibleReply.length > 0) {
+        this.appendRegistryPeerMessage(serviceId, 'assistant', visibleReply);
       }
       aiLogInfo('[ApplessRegistryPeerChat] stage=delivered peer=' + serviceId);
     } catch (error) {

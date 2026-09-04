@@ -18,6 +18,13 @@ export interface RegistryAgentReply {
   text: string;
 }
 
+export function visibleRegistryPeerReplyText(value: string): string {
+  const text = value.trim();
+  if (text === 'DELIVERED' ||
+    /^DELIVERED .+ \d+ bytes sha256=[a-f0-9]{64}$/i.test(text)) return '';
+  return text;
+}
+
 export interface RegistryTunnelStatus {
   connectedDevices: number;
   boundServices: number;
