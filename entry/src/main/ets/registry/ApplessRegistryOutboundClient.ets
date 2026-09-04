@@ -32,12 +32,19 @@ export interface RegistryTunnelStatus {
   onlineDevices: string[];
 }
 
-interface OutboundTextPart {
-  kind: string;
-  text: string;
+interface OutboundFileData {
+  name: string;
+  mimeType: string;
+  bytes: string;
 }
 
-interface OutboundPeerChatMetadata {
+interface OutboundPart {
+  kind: string;
+  text?: string;
+  file?: OutboundFileData;
+}
+
+interface OutboundMessageMetadata {
   applessMode: string;
   senderServiceId: string;
 }
@@ -45,8 +52,8 @@ interface OutboundPeerChatMetadata {
 interface OutboundMessage {
   messageId: string;
   role: string;
-  parts: OutboundTextPart[];
-  metadata?: OutboundPeerChatMetadata;
+  parts: OutboundPart[];
+  metadata?: OutboundMessageMetadata;
 }
 
 interface OutboundParams {
@@ -188,13 +195,12 @@ export function parseRegistryAgentReply(raw: string, serviceId: string): Registr
   return { serviceId, state, text };
 }
 
-function registryMessageRequestJson(text: string, metadata?: OutboundPeerChatMetadata): string {
+function registryPartsRequestJson(parts: OutboundPart[], metadata?: OutboundMessageMetadata): string {
   const requestId = 'appless-outbound-' + Date.now().toString();
-  const part: OutboundTextPart = { kind: 'text', text };
   const message: OutboundMessage = {
     messageId: requestId + '-message',
     role: 'user',
-    parts: [part]
+    parts
   };
   if (metadata !== undefined) message.metadata = metadata;
   const params: OutboundParams = { message };
@@ -208,11 +214,29 @@ function registryMessageRequestJson(text: string, metadata?: OutboundPeerChatMet
 }
 
 export function registryA2aRequestJson(text: string): string {
-  return registryMessageRequestJson(text);
+  const part: OutboundPart = { kind: 'text', text };
+  return registryPartsRequestJson([part]);
 }
 
 export function registryPeerChatRequestJson(text: string, senderServiceId: string): string {
-  return registryMessageRequestJson(text, {
+  const part: OutboundPart = { kind: 'text', text };
+  return registryPartsRequestJson([part], {
+    applessMode: 'peer_chat',
+    senderServiceId
+  });
+}
+
+export function registryPeerFileRequestJson(
+  name: string,
+  mimeType: string,
+  bytes: string,
+  senderServiceId: string,
+  text: string = ''
+): string {
+  const parts: OutboundPart[] = [];
+  if (text.trim().length > 0) parts.push({ kind: 'text', text: text.trim() });
+  parts.push({ kind: 'file', file: { name, mimeType, bytes } });
+  return registryPartsRequestJson(parts, {
     applessMode: 'peer_chat',
     senderServiceId
   });
@@ -346,6 +370,21 @@ export async function sendRegistryAgentMessage(
   text: string
 ): Promise<RegistryAgentReply> {
   return postRegistryAgentMessage(config, serviceId, registryA2aRequestJson(text));
+}
+
+export async function sendRegistryPeerFile(
+  config: ApplessRegistryConfig,
+  serviceId: string,
+  name: string,
+  mimeType: string,
+  bytes: string,
+  text: string = ''
+): Promise<RegistryAgentReply> {
+  return postRegistryAgentMessage(
+    config,
+    serviceId,
+    registryPeerFileRequestJson(name, mimeType, bytes, config.serviceId, text)
+  );
 }
 
 export async function sendRegistryPeerChatMessage(

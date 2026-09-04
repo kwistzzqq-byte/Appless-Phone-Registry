@@ -18,6 +18,7 @@ import {
   parseRegistryTunnelStatusResponse,
   registryA2aRequestJson,
   registryPeerChatRequestJson,
+  registryPeerFileRequestJson,
   visibleRegistryPeerReplyText
 } from '../main/ets/registry/ApplessRegistryOutboundClient';
 import {
@@ -34,6 +35,11 @@ import {
   registryArtifactRelayUriAllowed,
   safeRegistryFileName
 } from '../main/ets/registry/ApplessRegistryFileStore';
+import {
+  ApplessAgentLocalFile,
+  isPptTransferRequest,
+  newestAgentPpt
+} from '../main/ets/registry/ApplessRegistryAgentFileCapability';
 
 function config(token: string = ''): ApplessRegistryConfig {
   return {
@@ -307,6 +313,40 @@ export default function applessRegistryA2aTest(): void {
       expect(visibleRegistryPeerReplyText('你好！有什么需要我帮你处理的吗？'))
         .assertEqual('你好！有什么需要我帮你处理的吗？');
       expect(visibleRegistryPeerReplyText('  收到，我来看看。  ')).assertEqual('收到，我来看看。');
+    });
+
+    it('builds a standard FilePart reply and selects the newest PPT for Agent transfer', 0, () => {
+      const request = JSON.parse(registryPeerFileRequestJson(
+        'deck.pptx',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'UEs=',
+        'Appless-Phone2',
+        '来自 Phone2'
+      )) as Record<string, Object | string>;
+      const params = request['params'] as Record<string, Object>;
+      const message = params['message'] as Record<string, Object>;
+      const metadata = message['metadata'] as Record<string, string>;
+      const parts = message['parts'] as Array<Record<string, Object | string>>;
+      expect(metadata['applessMode']).assertEqual('peer_chat');
+      expect(metadata['senderServiceId']).assertEqual('Appless-Phone2');
+      expect(parts.length).assertEqual(2);
+      expect(parts[1]['kind']).assertEqual('file');
+
+      const files: ApplessAgentLocalFile[] = [{
+        name: 'old.pptx', mimeType: 'application/octet-stream', byteLength: 1,
+        modifiedAt: 10, path: '/old.pptx'
+      }, {
+        name: 'new.pptx', mimeType: 'application/octet-stream', byteLength: 1,
+        modifiedAt: 20, path: '/new.pptx'
+      }, {
+        name: 'later.txt', mimeType: 'text/plain', byteLength: 1,
+        modifiedAt: 30, path: '/later.txt'
+      }];
+      const newest = newestAgentPpt(files);
+      expect(newest === null).assertFalse();
+      if (newest !== null) expect(newest.name).assertEqual('new.pptx');
+      expect(isPptTransferRequest('让 Phone2 把PPT发给我')).assertTrue();
+      expect(isPptTransferRequest('介绍一下 PPT')).assertFalse();
     });
 
     it('exposes Registry operations as standard Agent tools', 0, () => {

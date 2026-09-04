@@ -507,9 +507,15 @@ import { applessRegistryConfig, ApplessRegistryConfig } from '../../registry/App
 import { ApplessTunnelClient } from '../../registry/ApplessTunnelClient';
 import {
   RegistryAgentReply,
+  sendRegistryPeerFile,
   sendRegistryPeerChatMessage,
   visibleRegistryPeerReplyText
 } from '../../registry/ApplessRegistryOutboundClient';
+import {
+  encodeAgentFile,
+  isPptTransferRequest,
+  latestAgentPpt
+} from '../../registry/ApplessRegistryAgentFileCapability';
 import {
   executeApplessRegistryTool,
   isApplessRegistryToolId,
@@ -4662,6 +4668,29 @@ struct Index {
     if (!input.ok) return a2aErrorResponse(input.status, input.error, input.requestId);
     if (input.peerChat) {
       try {
+        if (input.file === null && input.senderServiceId.length > 0 && isPptTransferRequest(input.text)) {
+          this.appendRegistryPeerMessage(input.senderServiceId, 'assistant', input.text);
+          const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+          const source = latestAgentPpt(context);
+          if (source === null) {
+            return a2aErrorResponse(404, 'Appless has no PPT file available to send.', input.requestId);
+          }
+          const encoded = encodeAgentFile(source);
+          const delivery = await sendRegistryPeerFile(
+            config,
+            input.senderServiceId,
+            encoded.name,
+            encoded.mimeType,
+            encoded.bytes,
+            '来自 ' + config.serviceId + ' 的文件'
+          );
+          if (delivery.state !== 'completed') {
+            return a2aErrorResponse(502, 'Appless could not deliver the PPT file.', input.requestId);
+          }
+          aiLogInfo('[ApplessRegistryAgentFile] stage=delivered peer=' + input.senderServiceId +
+            ' name=' + encoded.name + ' bytes=' + encoded.byteLength.toString());
+          return a2aCompletedResponse(input.requestId, '已发送文件：' + encoded.name);
+        }
         if (input.file !== null) {
           const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
           const stored = await storeRegistryPeerFile(
