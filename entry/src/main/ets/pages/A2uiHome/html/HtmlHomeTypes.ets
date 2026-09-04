@@ -95,6 +95,15 @@ export interface HtmlHomeHistoryItem {
   id: string;
   role: string;
   content: string;
+  file?: HtmlHomePeerFile;
+}
+
+export interface HtmlHomePeerFile {
+  attachmentId: string;
+  name: string;
+  mimeType: string;
+  byteLength: number;
+  sha256: string;
 }
 
 export interface HtmlHomePersona {

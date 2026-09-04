@@ -1056,6 +1056,51 @@ h3, .subtitle, .kind-tag, .status, .action, .chip, .label, .meta {
   padding: 10px 12px;
   border-radius: 5px 16px 16px 16px;
 }
+.registry-peer-file {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 196px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.registry-peer-file-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 40px;
+  border-radius: 7px;
+  background: rgba(153, 95, 76, 0.1);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.registry-peer-file-copy { min-width: 0; }
+.registry-peer-file-name {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.registry-peer-file-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.registry-peer-file-open { color: var(--accent); font-size: 17px; }
+.registry-peer-file:focus-visible {
+  outline: 2px solid rgba(153, 95, 76, 0.34);
+  outline-offset: 4px;
+}
 .plain-chat-user-message {
   display: grid;
   grid-template-columns: 24px minmax(0, auto);
@@ -4032,20 +4077,50 @@ const HTML_HOME_JS: string = `
     section.textContent = '';
     history.forEach(function (item) {
       var content = text(item && item.content).trim();
-      if (content.length === 0) { return; }
-      if (text(item && item.role) === 'user') {
+      var file = item && item.file && typeof item.file === 'object' ? item.file : null;
+      if (content.length === 0 && !file) { return; }
+      var isUser = text(item && item.role) === 'user';
+      var bubble;
+      if (isUser) {
         var userMessage = add(section, 'article', 'plain-chat-user-message');
-        var userCopy = add(userMessage, 'p', 'plain-chat-user-copy');
-        add(userCopy, 'span', 'plain-chat-user-text', content);
+        bubble = add(userMessage, 'div', 'plain-chat-user-copy');
+      } else {
+        var peerTurn = add(section, 'div', 'plain-chat-assistant-turn');
+        bubble = add(peerTurn, 'article', 'plain-chat-response');
+      }
+      if (!file) {
+        add(bubble, isUser ? 'span' : 'p', isUser ? 'plain-chat-user-text' : 'plain-chat-response-copy', content);
         return;
       }
-      var peerTurn = add(section, 'div', 'plain-chat-assistant-turn');
-      var response = add(peerTurn, 'article', 'plain-chat-response');
-      add(response, 'p', 'plain-chat-response-copy', content);
+      var button = add(bubble, 'button', 'registry-peer-file');
+      button.type = 'button';
+      button.setAttribute('aria-label', '打开文件：' + text(file.name));
+      add(button, 'span', 'registry-peer-file-icon', 'FILE');
+      var copy = add(button, 'span', 'registry-peer-file-copy');
+      add(copy, 'span', 'registry-peer-file-name', text(file.name));
+      add(copy, 'span', 'registry-peer-file-meta', readableFileSize(file.byteLength) + ' · 点击打开');
+      add(button, 'span', 'registry-peer-file-open', '›');
+      button.addEventListener('click', function () {
+        postAction({
+          id: 'registry.peer.file.open',
+          label: '打开文件',
+          prompt: '',
+          variant: 'secondary',
+          kind: 'client',
+          args: { attachmentId: text(file.attachmentId) }
+        });
+      });
     });
     setTimeout(function () {
       window.scrollTo(0, document.body ? document.body.scrollHeight : 0);
     }, 0);
+  }
+  function readableFileSize(value) {
+    var size = Number(value);
+    if (!Number.isFinite(size) || size < 0) { return '文件'; }
+    if (size < 1024) { return String(size) + ' B'; }
+    if (size < 1024 * 1024) { return (size / 1024).toFixed(size < 10240 ? 1 : 0) + ' KB'; }
+    return (size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
   }
   function addRegistryPeerChat(parent, history) {
     var section = add(parent, 'section', 'section plain-chat registry-peer-chat');

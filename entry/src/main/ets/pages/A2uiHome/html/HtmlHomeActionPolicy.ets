@@ -120,6 +120,9 @@ function isHtmlHomeActionAllowedInDocument(document: HtmlHomeDocument, action: A
   if (action.id === 'registry.device.chat') {
     return registryDeviceChatAllowedInDocument(document, action);
   }
+  if (action.id === 'registry.peer.file.open') {
+    return registryPeerFileOpenAllowedInDocument(document, action);
+  }
   if (action.id === 'memory_candidates_forget') {
     return memoryCandidatesForgetAllowedInDocument(document, action);
   }
@@ -205,6 +208,18 @@ function isHtmlHomeActionAllowedInDocument(document: HtmlHomeDocument, action: A
     return true;
   }
   return false;
+}
+
+function registryPeerFileOpenAllowedInDocument(document: HtmlHomeDocument, action: A2uiAction): boolean {
+  if (!(document.surfaceId ?? '').startsWith('registry-peer-') || action.kind !== 'client' ||
+    action.prompt !== '' || action.args === undefined || action.args === null ||
+    typeof action.args !== 'object' || Array.isArray(action.args)) return false;
+  const args = action.args as Record<string, HtmlHomePolicyValue>;
+  if (Object.keys(args).sort().join(',') !== 'attachmentId') return false;
+  const attachmentId = policyText(args['attachmentId']).trim();
+  if (attachmentId.length === 0 || attachmentId.length > 384) return false;
+  return document.history.some((item): boolean =>
+    item.file !== undefined && item.file.attachmentId === attachmentId);
 }
 
 function registryDeviceChatAllowedInDocument(document: HtmlHomeDocument, action: A2uiAction): boolean {

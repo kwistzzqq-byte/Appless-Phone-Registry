@@ -34,6 +34,14 @@ export interface A2aTextRequest {
   text: string;
   peerChat: boolean;
   senderServiceId: string;
+  file: A2aInboundFile | null;
+}
+
+export interface A2aInboundFile {
+  name: string;
+  mimeType: string;
+  bytes: string;
+  uri: string;
 }
 
 interface PeerChatMetadata {
@@ -206,6 +214,48 @@ function requestText(body: JsonRecord): string {
   return texts.join('\n').trim();
 }
 
+function requestFile(body: JsonRecord): A2aInboundFile | null {
+  const params = record(body['params']);
+  const message = params === null ? null : record(params['message']);
+  const parts = message === null ? null : message['parts'];
+  if (!Array.isArray(parts)) return null;
+  let result: A2aInboundFile | null = null;
+  (parts as Object[]).forEach((item: Object): void => {
+    const part = record(item);
+    if (part === null || stringValue(part, 'kind') !== 'file') return;
+    const file = record(part['file']);
+    if (file === null || result !== null) {
+      result = { name: '', mimeType: '', bytes: '', uri: '' };
+      return;
+    }
+    result = {
+      name: stringValue(file, 'name').trim(),
+      mimeType: stringValue(file, 'mimeType').trim(),
+      bytes: stringValue(file, 'bytes').trim(),
+      uri: stringValue(file, 'uri').trim()
+    };
+  });
+  return result;
+}
+
+function validFileName(value: string): boolean {
+  return value.length > 0 && value.length <= 180 && value !== '.' && value !== '..' &&
+    value.indexOf('/') < 0 && value.indexOf('\\') < 0 && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function validInlineBase64(value: string): boolean {
+  if (value.length === 0 || value.length > 7_000_000 || value.length % 4 !== 0) return false;
+  return /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
+}
+
+function validFileInput(file: A2aInboundFile | null): boolean {
+  if (file === null || !validFileName(file.name)) return false;
+  if (file.mimeType.length > 128 || file.uri.length > 2048) return false;
+  const sourceCount = (file.bytes.length > 0 ? 1 : 0) + (file.uri.length > 0 ? 1 : 0);
+  if (sourceCount !== 1) return false;
+  return file.bytes.length === 0 || validInlineBase64(file.bytes);
+}
+
 function peerChatMetadata(body: JsonRecord): PeerChatMetadata {
   const params = record(body['params']);
   const message = params === null ? null : record(params['message']);
@@ -218,7 +268,7 @@ function peerChatMetadata(body: JsonRecord): PeerChatMetadata {
 }
 
 function denied(status: number, error: string): A2aTextRequest {
-  return { ok: false, status, error, requestId: null, text: '', peerChat: false, senderServiceId: '' };
+  return { ok: false, status, error, requestId: null, text: '', peerChat: false, senderServiceId: '', file: null };
 }
 
 function matchesRegistryBinding(request: TunnelForwardRequest, config: ApplessRegistryConfig): boolean {
@@ -252,11 +302,19 @@ export function validateA2aTextRequest(
     return denied(400, 'A2A method is not supported.');
   }
   const text = requestText(body);
-  if (text.length === 0 || text.length > config.maxPromptChars) {
-    return denied(400, 'A2A text input is empty or too large.');
+  const file = requestFile(body);
+  if (text.length > config.maxPromptChars) {
+    return denied(400, 'A2A text input is too large.');
+  }
+  if (text.length === 0 && file === null) {
+    return denied(400, 'A2A message has no supported content.');
+  }
+  if (file !== null && !validFileInput(file)) {
+    return denied(400, 'A2A FilePart is invalid or ambiguous.');
   }
   const peerChat = peerChatMetadata(body);
-  if (peerChat.claimed && !/^[A-Za-z0-9._-]{1,128}$/.test(peerChat.senderServiceId)) {
+  const senderServiceId = peerChat.senderServiceId || (file !== null ? request.sourceDevice.trim() : '');
+  if ((peerChat.claimed || file !== null) && !/^[A-Za-z0-9._-]{1,128}$/.test(senderServiceId)) {
     return denied(400, 'Peer chat sender serviceId is invalid.');
   }
   const requestId = body['id'];
@@ -266,8 +324,9 @@ export function validateA2aTextRequest(
     error: '',
     requestId,
     text,
-    peerChat: peerChat.claimed,
-    senderServiceId: peerChat.senderServiceId
+    peerChat: peerChat.claimed || file !== null,
+    senderServiceId,
+    file
   };
 }
 
@@ -310,7 +369,7 @@ export function applessAgentCardResponse(
     description: 'Process one text request while Appless is in the foreground',
     tags: ['mobile', 'text', 'read-only'],
     examples: [],
-    inputModes: ['text/plain'],
+    inputModes: ['text/plain', 'application/octet-stream'],
     outputModes: ['text/plain']
   };
   const capabilities: ApplessAgentCardCapabilities = {
@@ -334,7 +393,7 @@ export function applessAgentCardResponse(
     preferredTransport: 'JSONRPC',
     capabilities,
     skills: [skill],
-    defaultInputModes: ['text/plain'],
+    defaultInputModes: ['text/plain', 'application/octet-stream'],
     defaultOutputModes: ['text/plain'],
     security: [securityEntry],
     securitySchemes,

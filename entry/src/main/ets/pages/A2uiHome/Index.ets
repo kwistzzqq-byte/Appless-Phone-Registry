@@ -70,7 +70,7 @@ import {
   WaterfallRankingWorkerResult
 } from './waterfall/WaterfallRankingWorkerClient';
 import router from '@ohos.router';
-import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
+import { abilityAccessCtrl, bundleManager, common, Permissions, wantConstant } from '@kit.AbilityKit';
 import { accessibility } from '@kit.AccessibilityKit';
 import { preferences } from '@kit.ArkData';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -80,6 +80,7 @@ import { call } from '@kit.TelephonyKit';
 import { mapCommon, petalMaps } from '@kit.MapKit';
 import promptAction from '@ohos.promptAction';
 import fs from '@ohos.file.fs';
+import { fileUri } from '@kit.CoreFileKit';
 import { geoLocationManager } from '@kit.LocationKit';
 import { inputMethod } from '@kit.IMEKit';
 import util from '@ohos.util';
@@ -521,6 +522,10 @@ import {
   TunnelHttpResponse,
   validateA2aTextRequest
 } from '../../registry/ApplessA2aProtocol';
+import {
+  RegistryPeerStoredFile,
+  storeRegistryPeerFile
+} from '../../registry/ApplessRegistryFileStore';
 
 interface FoodStoreMapLocationActionArgs {
   surfaceId: string;
@@ -1264,6 +1269,8 @@ struct Index {
   private registryMainConversationDraft: string = '';
   private registryPeerMessageSequence: number = 0;
   private registryPeerMessagesByServiceId: Map<string, A2uiMessage[]> = new Map<string, A2uiMessage[]>();
+  private registryPeerFilesByMessageId: Map<string, RegistryPeerStoredFile> = new Map<string, RegistryPeerStoredFile>();
+  private registryPeerFilesByAttachmentId: Map<string, RegistryPeerStoredFile> = new Map<string, RegistryPeerStoredFile>();
   private registryPeerDraftByServiceId: Map<string, string> = new Map<string, string>();
   private phoneLocalMemoryRuntime: PhoneLocalMemoryRuntime | null = null;
   private phoneLocalMemoryAvailability: PhoneLocalMemoryAvailabilityPort | null = null;
@@ -4653,10 +4660,33 @@ struct Index {
     const input = validateA2aTextRequest(request, config);
     if (!input.ok) return a2aErrorResponse(input.status, input.error, input.requestId);
     if (input.peerChat) {
-      this.appendRegistryPeerMessage(input.senderServiceId, 'assistant', input.text);
-      aiLogInfo('[ApplessRegistryPeerChat] stage=received peer=' + input.senderServiceId +
-        ' chars=' + input.text.length.toString());
-      return a2aCompletedResponse(input.requestId, 'DELIVERED');
+      try {
+        if (input.file !== null) {
+          const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+          const stored = await storeRegistryPeerFile(
+            context, config, input.senderServiceId, request.messageId, input.file);
+          if (input.text.length > 0) {
+            this.appendRegistryPeerMessage(input.senderServiceId, 'assistant', input.text);
+          }
+          this.appendRegistryPeerFile(input.senderServiceId, stored);
+          aiLogInfo('[ApplessRegistryPeerFile] stage=stored peer=' + input.senderServiceId +
+            ' name=' + stored.name + ' bytes=' + stored.byteLength.toString() +
+            ' sha256=' + stored.sha256);
+          return a2aCompletedResponse(input.requestId, 'DELIVERED ' + stored.name +
+            ' ' + stored.byteLength.toString() + ' bytes sha256=' + stored.sha256);
+        }
+        if (input.text.length > 0) {
+          this.appendRegistryPeerMessage(input.senderServiceId, 'assistant', input.text);
+        }
+        aiLogInfo('[ApplessRegistryPeerChat] stage=received peer=' + input.senderServiceId +
+          ' chars=' + input.text.length.toString());
+        return a2aCompletedResponse(input.requestId, 'DELIVERED');
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : JSON.stringify(error);
+        aiLogError('[ApplessRegistryPeerFile] stage=failed peer=' + input.senderServiceId +
+          ' reason=' + logSnippet(detail));
+        return a2aErrorResponse(502, 'Appless could not store the received file.', input.requestId);
+      }
     }
     if (this.isBusy || this.registryRemoteBusy) {
       return a2aErrorResponse(409, 'Appless is busy with another foreground turn.', input.requestId);
@@ -4864,12 +4894,24 @@ struct Index {
 
   private currentHtmlHomeDocument(): HtmlHomeDocument {
     if (this.registryPeerConversationActive()) {
-      return createHtmlHomeDocument({
+      const document = createHtmlHomeDocument({
         surface: this.registryPeerSurface(),
         messages: this.registryPeerMessages,
         isBusy: this.registryPeerConversationBusy(),
         isAwaitingFirstSurface: false
       });
+      document.history.forEach((item): void => {
+        const stored = this.registryPeerFilesByMessageId.get(item.id);
+        if (stored === undefined) return;
+        item.file = {
+          attachmentId: stored.attachmentId,
+          name: stored.name,
+          mimeType: stored.mimeType,
+          byteLength: stored.byteLength,
+          sha256: stored.sha256
+        };
+      });
+      return document;
     }
     if (shouldShowDeepSearchPendingSurface(this.showDeepSearch, this.isBusy)) {
       const document = createHtmlHomeDocument({
@@ -5639,7 +5681,7 @@ struct Index {
     };
   }
 
-  private appendRegistryPeerMessage(serviceId: string, role: string, content: string): void {
+  private appendRegistryPeerMessage(serviceId: string, role: string, content: string): string {
     const stored = this.registryPeerMessagesByServiceId.get(serviceId);
     const next: A2uiMessage[] = stored === undefined ? [] : stored.slice();
     this.registryPeerMessageSequence += 1;
@@ -5653,6 +5695,44 @@ struct Index {
     this.surfaceRenderTick += 1;
     this.htmlHomeCacheKey = '';
     this.htmlHomeCacheHtml = '';
+    return messageId;
+  }
+
+  private appendRegistryPeerFile(serviceId: string, stored: RegistryPeerStoredFile): void {
+    const messageId = this.appendRegistryPeerMessage(serviceId, 'assistant', stored.name);
+    this.registryPeerFilesByMessageId.set(messageId, stored);
+    this.registryPeerFilesByAttachmentId.set(stored.attachmentId, stored);
+  }
+
+  private async openRegistryPeerFile(action: A2uiAction): Promise<void> {
+    const raw = action.args as Record<string, Object | string | number | boolean | null | undefined> | undefined;
+    const attachmentId = raw === undefined ? '' : this.actionText(raw['attachmentId']).trim();
+    const stored = this.registryPeerFilesByAttachmentId.get(attachmentId);
+    let available = false;
+    if (stored !== undefined) {
+      try {
+        available = fs.accessSync(stored.path);
+      } catch (_error) {
+      }
+    }
+    if (stored === undefined || !available) {
+      this.getUIContext().getPromptAction().showToast({ message: '文件已不存在或不可访问。' });
+      return;
+    }
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await context.startAbility({
+        action: 'ohos.want.action.viewData',
+        uri: fileUri.getUriFromPath(stored.path),
+        type: stored.mimeType,
+        flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
+      });
+      aiLogInfo('[ApplessRegistryPeerFile] stage=opened attachment=' + attachmentId);
+    } catch (error) {
+      aiLogError('[ApplessRegistryPeerFile] stage=open_failed attachment=' + attachmentId +
+        ' reason=' + logSnippet(error instanceof Error ? error.message : JSON.stringify(error)));
+      this.getUIContext().getPromptAction().showToast({ message: '暂不支持打开该文件类型。' });
+    }
   }
 
   private openRegistryPeerConversation(action: A2uiAction): void {
@@ -8729,6 +8809,10 @@ struct Index {
       this.openRegistryPeerConversation(action);
       return;
     }
+    if (action.id === 'registry.peer.file.open') {
+      await this.openRegistryPeerFile(action);
+      return;
+    }
     if (action.id === 'food_store_map_open') {
       const args = action.args as Record<string, Object | string | number | boolean | null | undefined> | undefined;
       if (args !== undefined && this.actionText(args['surfaceId']) === this.currentSurface.surfaceId &&
@@ -9946,7 +10030,7 @@ struct Index {
       return;
     }
     const renderedSnapshot = this.registeredPageSnapshotStore.current();
-    const document = renderedSnapshot === null ?
+    const document = this.registryPeerConversationActive() || renderedSnapshot === null ?
       this.currentHtmlHomeDocument() : renderedSnapshot.document;
     if (!isHtmlHomeActionAllowed(document, action)) {
       if (this.isLuckinPaymentActionId(action.id)) {

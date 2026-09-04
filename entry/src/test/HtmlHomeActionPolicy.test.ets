@@ -228,6 +228,31 @@ export default function htmlHomeActionPolicyTest() {
       expect(isHtmlHomeActionAllowed(doc, promptRouted)).assertFalse();
     });
 
+    it('opens only an attachment present in the current registry peer history', 0, () => {
+      const doc = documentFixture();
+      doc.surfaceId = 'registry-peer-JiuwenSwarm-Mac';
+      doc.kind = 'generic';
+      doc.history = [{
+        id: 'file-message-1',
+        role: 'assistant',
+        content: '9.3.md',
+        file: {
+          attachmentId: 'attachment-1',
+          name: '9.3.md',
+          mimeType: 'text/markdown',
+          byteLength: 1,
+          sha256: 'digest'
+        }
+      }];
+      const allowed = action('registry.peer.file.open', '', 'client',
+        JSON.parse('{"attachmentId":"attachment-1"}') as Object);
+      const forged = action('registry.peer.file.open', '', 'client',
+        JSON.parse('{"attachmentId":"attachment-other"}') as Object);
+
+      expect(isHtmlHomeActionAllowed(doc, allowed)).assertTrue();
+      expect(isHtmlHomeActionAllowed(doc, forged)).assertFalse();
+    });
+
     it('allows exact daily brief snapshot actions', 0, () => {
       const doc = documentFixture();
       doc.kind = JSON.parse('"daily-brief"') as HtmlHomeKind;

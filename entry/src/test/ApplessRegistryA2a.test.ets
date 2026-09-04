@@ -29,6 +29,10 @@ import {
   REGISTRY_STATUS_TOOL_ID,
   registryStandardToolsOwnPrompt
 } from '../main/ets/registry/ApplessRegistryTools';
+import {
+  registryArtifactRelayUriAllowed,
+  safeRegistryFileName
+} from '../main/ets/registry/ApplessRegistryFileStore';
 
 function config(token: string = ''): ApplessRegistryConfig {
   return {
@@ -85,6 +89,15 @@ function peerChatRequest(senderServiceId: string = 'Appless-Phone2'): string {
     '"params":{"message":{"role":"user","metadata":{"applessMode":"peer_chat",' +
     '"senderServiceId":' + JSON.stringify(senderServiceId) + '},"parts":[' +
     '{"kind":"text","text":"hello from phone 2"}]}}}}}';
+}
+
+function peerFileRequest(fileJson: string, sourceDevice: string = 'JiuwenSwarm-Mac'): string {
+  return '{"type":"forward_request","message_id":"peer-file-1",' +
+    '"source_device":' + JSON.stringify(sourceDevice) + ',"target_device":"Appless-Phone1",' +
+    '"http_request":{"method":"POST","path":"/a2a/jsonrpc",' +
+    '"headers":{"Authorization":"Bearer peer-bearer-token-that-is-long-enough"},' +
+    '"body":{"jsonrpc":"2.0","id":"peer-file-rpc-1","method":"message/send",' +
+    '"params":{"message":{"role":"user","parts":[{"kind":"file","file":' + fileJson + '}]}}}}}';
 }
 
 export default function applessRegistryA2aTest(): void {
@@ -168,6 +181,61 @@ export default function applessRegistryA2aTest(): void {
       expect(validateA2aTextRequest(request, config()).ok).assertTrue();
       request.targetDevice = 'Another-Phone';
       expect(validateA2aTextRequest(request, config()).status).assertEqual(404);
+    });
+
+    it('accepts a standard inline FilePart as direct peer chat without model routing', 0, () => {
+      const request = tunnelForwardRequestFromJson(peerFileRequest(
+        '{"name":"9.3.md","mimeType":"text/markdown","bytes":"Cg=="}'));
+      expect(request === null).assertFalse();
+      if (request === null) return;
+      const accepted = validateA2aTextRequest(request, config());
+      expect(accepted.ok).assertTrue();
+      expect(accepted.peerChat).assertTrue();
+      expect(accepted.senderServiceId).assertEqual('JiuwenSwarm-Mac');
+      expect(accepted.text).assertEqual('');
+      expect(accepted.file === null).assertFalse();
+      if (accepted.file === null) return;
+      expect(accepted.file.name).assertEqual('9.3.md');
+      expect(accepted.file.mimeType).assertEqual('text/markdown');
+      expect(accepted.file.bytes).assertEqual('Cg==');
+      expect(accepted.file.uri).assertEqual('');
+    });
+
+    it('accepts only one well-formed FilePart source with a known peer identity', 0, () => {
+      const uriRequest = tunnelForwardRequestFromJson(peerFileRequest(
+        '{"name":"report.pdf","mimeType":"application/pdf",' +
+        '"uri":"http://registry.example.test:8000/api/artifact-relay/uri/t1/signed"}'));
+      expect(uriRequest === null).assertFalse();
+      if (uriRequest !== null) {
+        const accepted = validateA2aTextRequest(uriRequest, config());
+        expect(accepted.ok).assertTrue();
+        expect(accepted.file === null).assertFalse();
+        if (accepted.file !== null) expect(accepted.file.uri.indexOf('/api/artifact-relay/uri/')).assertLarger(-1);
+      }
+      const ambiguous = tunnelForwardRequestFromJson(peerFileRequest(
+        '{"name":"bad.bin","mimeType":"application/octet-stream","bytes":"AA==",' +
+        '"uri":"http://registry.example.test:8000/api/artifact-relay/uri/t1/signed"}'));
+      expect(ambiguous === null).assertFalse();
+      if (ambiguous !== null) expect(validateA2aTextRequest(ambiguous, config()).status).assertEqual(400);
+      const anonymous = tunnelForwardRequestFromJson(peerFileRequest(
+        '{"name":"9.3.md","mimeType":"text/markdown","bytes":"Cg=="}', ''));
+      expect(anonymous === null).assertFalse();
+      if (anonymous !== null) expect(validateA2aTextRequest(anonymous, config()).status).assertEqual(400);
+    });
+
+    it('confines received names and URI downloads to the configured Registry relay', 0, () => {
+      expect(safeRegistryFileName('9.3.md')).assertEqual('9.3.md');
+      expect(safeRegistryFileName('../9.3.md')).assertEqual('');
+      expect(safeRegistryFileName('folder\\9.3.md')).assertEqual('');
+      expect(registryArtifactRelayUriAllowed(
+        'http://registry.example.test:8000/api/artifact-relay/uri/t1/signed-token',
+        'http://registry.example.test:8000')).assertTrue();
+      expect(registryArtifactRelayUriAllowed(
+        'http://registry.example.test:8000.evil/api/artifact-relay/uri/t1/signed-token',
+        'http://registry.example.test:8000')).assertFalse();
+      expect(registryArtifactRelayUriAllowed(
+        'http://registry.example.test:8000/api/artifact-relay/transfers/t1',
+        'http://registry.example.test:8000')).assertFalse();
     });
 
     it('returns the A2A completed artifact shape used by existing Jiuwen tooling', 0, () => {

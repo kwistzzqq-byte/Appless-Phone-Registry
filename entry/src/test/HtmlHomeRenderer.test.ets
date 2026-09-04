@@ -2341,6 +2341,35 @@ export default function htmlHomeRendererTest() {
       expect(html.indexOf('if (registryPeerName().length > 0) { return; }')).assertLarger(-1);
     });
 
+    it('renders a received peer file as an openable file bubble', 0, () => {
+      const doc = documentFixture();
+      doc.surfaceId = 'registry-peer-JiuwenSwarm-Mac';
+      doc.source = 'model';
+      doc.kind = 'generic';
+      doc.title = 'JiuwenSwarm-Mac';
+      doc.subtitle = '';
+      doc.timeline = [];
+      doc.blocks = [];
+      doc.history = [{
+        id: 'file-message-1',
+        role: 'assistant',
+        content: '9.3.md',
+        file: {
+          attachmentId: 'attachment-1',
+          name: '9.3.md',
+          mimeType: 'text/markdown',
+          byteLength: 1,
+          sha256: '01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b'
+        }
+      }];
+      const html = renderHtmlHomeDocument(doc);
+
+      expect(html.indexOf('registry-peer-file')).assertLarger(-1);
+      expect(html.indexOf('registry.peer.file.open')).assertLarger(-1);
+      expect(html.indexOf('attachment-1')).assertLarger(-1);
+      expect(html.indexOf('/data/storage')).assertEqual(-1);
+    });
+
     it('keeps more than six registry peer messages available for scrolling', 0, () => {
       const surface: A2uiSurfaceState = {
         surfaceId: 'registry-peer-Appless-Phone2',
