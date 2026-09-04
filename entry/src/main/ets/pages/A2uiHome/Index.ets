@@ -512,9 +512,10 @@ import {
   visibleRegistryPeerReplyText
 } from '../../registry/ApplessRegistryOutboundClient';
 import {
-  encodeAgentFile,
-  isPptTransferRequest,
-  latestAgentPpt
+  ApplessAgentEncodedFile,
+  ApplessPptTransferIntent,
+  latestRegistryInboxPptForTransfer,
+  pptTransferIntent
 } from '../../registry/ApplessRegistryAgentFileCapability';
 import {
   executeApplessRegistryTool,
@@ -1279,6 +1280,9 @@ struct Index {
   private registryPeerFilesByMessageId: Map<string, RegistryPeerStoredFile> = new Map<string, RegistryPeerStoredFile>();
   private registryPeerFilesByAttachmentId: Map<string, RegistryPeerStoredFile> = new Map<string, RegistryPeerStoredFile>();
   private registryPeerDraftByServiceId: Map<string, string> = new Map<string, string>();
+  private registryPeerFileRequestResults: Map<string, string> = new Map<string, string>();
+  private registryPeerFileRequestOrder: string[] = [];
+  private registryPeerFileRequestsInFlight: Set<string> = new Set<string>();
   private phoneLocalMemoryRuntime: PhoneLocalMemoryRuntime | null = null;
   private phoneLocalMemoryAvailability: PhoneLocalMemoryAvailabilityPort | null = null;
   private bimStoreInstance: BimStore | null = null;
@@ -4668,28 +4672,29 @@ struct Index {
     if (!input.ok) return a2aErrorResponse(input.status, input.error, input.requestId);
     if (input.peerChat) {
       try {
-        if (input.file === null && input.senderServiceId.length > 0 && isPptTransferRequest(input.text)) {
-          this.appendRegistryPeerMessage(input.senderServiceId, 'assistant', input.text);
-          const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-          const source = latestAgentPpt(context);
-          if (source === null) {
-            return a2aErrorResponse(404, 'Appless has no PPT file available to send.', input.requestId);
+        if (input.file === null && input.senderServiceId.length > 0 &&
+          pptTransferIntent(input.text) === ApplessPptTransferIntent.REQUEST_FROM_PEER) {
+          const replayKey = input.senderServiceId + ':' + request.messageId;
+          const previousFile = this.registryPeerFileRequestResults.get(replayKey);
+          if (previousFile !== undefined) {
+            return a2aCompletedResponse(input.requestId, '已发送文件：' + previousFile);
           }
-          const encoded = encodeAgentFile(source);
-          const delivery = await sendRegistryPeerFile(
-            config,
-            input.senderServiceId,
-            encoded.name,
-            encoded.mimeType,
-            encoded.bytes,
-            '来自 ' + config.serviceId + ' 的文件'
-          );
-          if (delivery.state !== 'completed') {
-            return a2aErrorResponse(502, 'Appless could not deliver the PPT file.', input.requestId);
+          if (this.registryPeerFileRequestsInFlight.has(replayKey)) {
+            return a2aErrorResponse(409, 'The peer file request is already in progress.', input.requestId);
           }
-          aiLogInfo('[ApplessRegistryAgentFile] stage=delivered peer=' + input.senderServiceId +
-            ' name=' + encoded.name + ' bytes=' + encoded.byteLength.toString());
-          return a2aCompletedResponse(input.requestId, '已发送文件：' + encoded.name);
+          this.registryPeerFileRequestsInFlight.add(replayKey);
+          try {
+            this.appendRegistryPeerMessage(input.senderServiceId, 'assistant', input.text);
+            const sent = await this.sendLatestRegistryPeerPpt(
+              config, input.senderServiceId, '来自 ' + config.serviceId + ' 的文件');
+            if (sent === null) {
+              return a2aErrorResponse(404, 'Appless has no PPT file available to send.', input.requestId);
+            }
+            this.rememberRegistryPeerFileRequest(replayKey, sent.name);
+            return a2aCompletedResponse(input.requestId, '已发送文件：' + sent.name);
+          } finally {
+            this.registryPeerFileRequestsInFlight.delete(replayKey);
+          }
         }
         if (input.file !== null) {
           const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -4715,7 +4720,7 @@ struct Index {
         const detail = error instanceof Error ? error.message : JSON.stringify(error);
         aiLogError('[ApplessRegistryPeerFile] stage=failed peer=' + input.senderServiceId +
           ' reason=' + logSnippet(detail));
-        return a2aErrorResponse(502, 'Appless could not store the received file.', input.requestId);
+        return a2aErrorResponse(502, 'Appless could not handle the peer file message.', input.requestId);
       }
     }
     if (this.isBusy || this.registryRemoteBusy) {
@@ -5728,8 +5733,44 @@ struct Index {
     return messageId;
   }
 
-  private appendRegistryPeerFile(serviceId: string, stored: RegistryPeerStoredFile): void {
-    const messageId = this.appendRegistryPeerMessage(serviceId, 'assistant', stored.name);
+  private async sendLatestRegistryPeerPpt(
+    config: ApplessRegistryConfig,
+    serviceId: string,
+    text: string
+  ): Promise<ApplessAgentEncodedFile | null> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const file = latestRegistryInboxPptForTransfer(context);
+    if (file === null) return null;
+    const delivery = await sendRegistryPeerFile(
+      config, serviceId, file.name, file.mimeType, file.bytes, text);
+    if (delivery.state !== 'completed') throw new Error(delivery.text);
+    this.appendRegistryPeerFile(serviceId, {
+      attachmentId: 'local-' + Date.now().toString(),
+      name: file.name,
+      mimeType: file.mimeType,
+      byteLength: file.byteLength,
+      sha256: '',
+      path: file.path
+    }, 'user');
+    aiLogInfo('[ApplessRegistryAgentFile] stage=delivered peer=' + serviceId +
+      ' name=' + file.name + ' bytes=' + file.byteLength.toString());
+    return file;
+  }
+
+  private rememberRegistryPeerFileRequest(key: string, fileName: string): void {
+    this.registryPeerFileRequestResults.set(key, fileName);
+    this.registryPeerFileRequestOrder.push(key);
+    if (this.registryPeerFileRequestOrder.length <= 64) return;
+    const expired = this.registryPeerFileRequestOrder.shift();
+    if (expired !== undefined) this.registryPeerFileRequestResults.delete(expired);
+  }
+
+  private appendRegistryPeerFile(
+    serviceId: string,
+    stored: RegistryPeerStoredFile,
+    role: string = 'assistant'
+  ): void {
+    const messageId = this.appendRegistryPeerMessage(serviceId, role, stored.name);
     this.registryPeerFilesByMessageId.set(messageId, stored);
     this.registryPeerFilesByAttachmentId.set(stored.attachmentId, stored);
   }
@@ -5818,8 +5859,14 @@ struct Index {
     aiLogInfo('[ApplessRegistryPeerChat] stage=sending peer=' + serviceId +
       ' chars=' + message.length.toString());
     try {
-      const reply: RegistryAgentReply = await sendRegistryPeerChatMessage(
-        applessRegistryConfig(), serviceId, message);
+      const config = applessRegistryConfig();
+      if (pptTransferIntent(message) === ApplessPptTransferIntent.SEND_TO_PEER) {
+        const sent = await this.sendLatestRegistryPeerPpt(config, serviceId, message);
+        if (sent === null) throw new Error('本机没有可发送的 PPT 文件。');
+        aiLogInfo('[ApplessRegistryPeerChat] stage=delivered peer=' + serviceId);
+        return;
+      }
+      const reply: RegistryAgentReply = await sendRegistryPeerChatMessage(config, serviceId, message);
       if (reply.state !== 'completed') {
         throw new Error(reply.text);
       }

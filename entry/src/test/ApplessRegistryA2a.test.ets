@@ -37,8 +37,9 @@ import {
 } from '../main/ets/registry/ApplessRegistryFileStore';
 import {
   ApplessAgentLocalFile,
-  isPptTransferRequest,
-  newestAgentPpt
+  ApplessPptTransferIntent,
+  newestAgentPpt,
+  pptTransferIntent
 } from '../main/ets/registry/ApplessRegistryAgentFileCapability';
 
 function config(token: string = ''): ApplessRegistryConfig {
@@ -345,8 +346,24 @@ export default function applessRegistryA2aTest(): void {
       const newest = newestAgentPpt(files);
       expect(newest === null).assertFalse();
       if (newest !== null) expect(newest.name).assertEqual('new.pptx');
-      expect(isPptTransferRequest('让 Phone2 把PPT发给我')).assertTrue();
-      expect(isPptTransferRequest('介绍一下 PPT')).assertFalse();
+      expect(pptTransferIntent('让 Phone2 把PPT发给我'))
+        .assertEqual(ApplessPptTransferIntent.REQUEST_FROM_PEER);
+      expect(pptTransferIntent('把PPT发过来'))
+        .assertEqual(ApplessPptTransferIntent.REQUEST_FROM_PEER);
+      expect(pptTransferIntent('把PPT给我'))
+        .assertEqual(ApplessPptTransferIntent.REQUEST_FROM_PEER);
+      expect(pptTransferIntent('我把PPT发给你'))
+        .assertEqual(ApplessPptTransferIntent.SEND_TO_PEER);
+      expect(pptTransferIntent('PPT给你'))
+        .assertEqual(ApplessPptTransferIntent.SEND_TO_PEER);
+      expect(pptTransferIntent('给对方发一个演示文稿'))
+        .assertEqual(ApplessPptTransferIntent.SEND_TO_PEER);
+      expect(pptTransferIntent('介绍一下 PPT'))
+        .assertEqual(ApplessPptTransferIntent.NONE);
+      expect(pptTransferIntent('怎么把PPT发给你？'))
+        .assertEqual(ApplessPptTransferIntent.NONE);
+      expect(pptTransferIntent('你知道谁能把PPT发给我吗？'))
+        .assertEqual(ApplessPptTransferIntent.NONE);
     });
 
     it('exposes Registry operations as standard Agent tools', 0, () => {

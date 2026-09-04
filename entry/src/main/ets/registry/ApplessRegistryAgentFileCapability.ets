@@ -3,6 +3,9 @@ import util from '@ohos.util';
 import { common } from '@kit.AbilityKit';
 
 const MAX_AGENT_FILE_BYTES: number = 5 * 1024 * 1024;
+const PPT_TRANSFER_MARKERS: string[] = ['发', '传', '给我', '给你', '给对方', '给对面', '过来'];
+const PPT_DISCUSSION_MARKERS: string[] = ['怎么', '如何', '谁能', '知不知道', '是否', '为什么', '是什么', '介绍', '教程', '方法'];
+const PPT_SEND_TO_PEER_MARKERS: string[] = ['给你', '给对方', '给对面', '我发', '我传'];
 
 export interface ApplessAgentLocalFile {
   name: string;
@@ -17,14 +20,31 @@ export interface ApplessAgentEncodedFile {
   mimeType: string;
   byteLength: number;
   bytes: string;
+  path: string;
 }
 
-export function isPptTransferRequest(text: string): boolean {
+export enum ApplessPptTransferIntent {
+  NONE,
+  REQUEST_FROM_PEER,
+  SEND_TO_PEER
+}
+
+function containsAny(text: string, markers: string[]): boolean {
+  for (let index = 0; index < markers.length; index++) {
+    if (text.indexOf(markers[index]) >= 0) return true;
+  }
+  return false;
+}
+
+export function pptTransferIntent(text: string): ApplessPptTransferIntent {
   const lower = text.toLowerCase();
   const mentionsPpt = lower.indexOf('ppt') >= 0 || text.indexOf('演示文稿') >= 0;
-  const requestsTransfer = text.indexOf('发') >= 0 || text.indexOf('传') >= 0 ||
-    text.indexOf('给我') >= 0 || text.indexOf('过来') >= 0;
-  return mentionsPpt && requestsTransfer;
+  if (!mentionsPpt || !containsAny(text, PPT_TRANSFER_MARKERS) ||
+    containsAny(text, PPT_DISCUSSION_MARKERS)) return ApplessPptTransferIntent.NONE;
+  if (containsAny(text, PPT_SEND_TO_PEER_MARKERS)) {
+    return ApplessPptTransferIntent.SEND_TO_PEER;
+  }
+  return ApplessPptTransferIntent.REQUEST_FROM_PEER;
 }
 
 export function newestAgentPpt(files: ApplessAgentLocalFile[]): ApplessAgentLocalFile | null {
@@ -67,7 +87,7 @@ function collectFiles(path: string, depth: number, result: ApplessAgentLocalFile
   });
 }
 
-export function latestAgentPpt(context: common.UIAbilityContext): ApplessAgentLocalFile | null {
+function latestRegistryInboxPpt(context: common.UIAbilityContext): ApplessAgentLocalFile | null {
   const files: ApplessAgentLocalFile[] = [];
   collectFiles(context.filesDir + '/registry-peer-inbox', 0, files);
   return newestAgentPpt(files);
@@ -86,9 +106,15 @@ export function encodeAgentFile(file: ApplessAgentLocalFile): ApplessAgentEncode
       name: file.name,
       mimeType: file.mimeType,
       byteLength: file.byteLength,
-      bytes: new util.Base64Helper().encodeToStringSync(new Uint8Array(buffer), util.Type.BASIC)
+      bytes: new util.Base64Helper().encodeToStringSync(new Uint8Array(buffer), util.Type.BASIC),
+      path: file.path
     };
   } finally {
     fs.closeSync(handle);
   }
+}
+
+export function latestRegistryInboxPptForTransfer(context: common.UIAbilityContext): ApplessAgentEncodedFile | null {
+  const file = latestRegistryInboxPpt(context);
+  return file === null ? null : encodeAgentFile(file);
 }
