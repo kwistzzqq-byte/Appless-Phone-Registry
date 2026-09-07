@@ -20,13 +20,31 @@ export interface ApplessAgentEncodedFile {
   path: string;
 }
 
-export function newestAgentFile(files: ApplessAgentLocalFile[]): ApplessAgentLocalFile | null {
-  let newest: ApplessAgentLocalFile | null = null;
-  files.forEach((file: ApplessAgentLocalFile): void => {
-    if (file.name.toLowerCase().endsWith('.part')) return;
-    if (newest === null || file.modifiedAt > newest.modifiedAt) newest = file;
-  });
-  return newest;
+export interface ApplessAgentSelectableFile extends ApplessAgentLocalFile {
+  fileId: string;
+}
+
+export function selectableAgentFiles(files: ApplessAgentLocalFile[]): ApplessAgentSelectableFile[] {
+  const sorted = files.filter((file: ApplessAgentLocalFile): boolean =>
+    !file.name.toLowerCase().endsWith('.part'))
+    .sort((left: ApplessAgentLocalFile, right: ApplessAgentLocalFile): number =>
+      right.modifiedAt - left.modifiedAt);
+  const names = new Set<string>();
+  const result: ApplessAgentSelectableFile[] = [];
+  for (let index = 0; index < sorted.length && result.length < 20; index++) {
+    const key = sorted[index].name.toLowerCase();
+    if (names.has(key)) continue;
+    names.add(key);
+    result.push({
+      fileId: 'file-' + (result.length + 1).toString(),
+      name: sorted[index].name,
+      mimeType: sorted[index].mimeType,
+      byteLength: sorted[index].byteLength,
+      modifiedAt: sorted[index].modifiedAt,
+      path: sorted[index].path
+    });
+  }
+  return result;
 }
 
 function mimeTypeForName(name: string): string {
@@ -70,10 +88,10 @@ function collectFiles(path: string, depth: number, result: ApplessAgentLocalFile
   });
 }
 
-function latestRegistryInboxFile(context: common.UIAbilityContext): ApplessAgentLocalFile | null {
+export function selectableRegistryInboxFiles(context: common.UIAbilityContext): ApplessAgentSelectableFile[] {
   const files: ApplessAgentLocalFile[] = [];
   collectFiles(context.filesDir + '/registry-peer-inbox', 0, files);
-  return newestAgentFile(files);
+  return selectableAgentFiles(files);
 }
 
 export function encodeAgentFile(file: ApplessAgentLocalFile): ApplessAgentEncodedFile {
@@ -95,9 +113,4 @@ export function encodeAgentFile(file: ApplessAgentLocalFile): ApplessAgentEncode
   } finally {
     fs.closeSync(handle);
   }
-}
-
-export function latestRegistryInboxFileForTransfer(context: common.UIAbilityContext): ApplessAgentEncodedFile | null {
-  const file = latestRegistryInboxFile(context);
-  return file === null ? null : encodeAgentFile(file);
 }

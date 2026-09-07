@@ -38,21 +38,23 @@ import {
 } from '../main/ets/registry/ApplessRegistryFileStore';
 import {
   ApplessAgentLocalFile,
-  newestAgentFile
+  selectableAgentFiles
 } from '../main/ets/registry/ApplessRegistryAgentFileCapability';
 import {
   ApplessRegistryPeerAgentAction,
+  ApplessRegistryPeerAgentFile,
   REGISTRY_PEER_DIRECT_MODE_ENABLED,
+  REGISTRY_PEER_LIST_FILES_TOOL_ID,
   REGISTRY_PEER_SEND_FILE_TOOL_ID,
-  planRegistryPeerAgentAction
+  runRegistryPeerAgentTurn
 } from '../main/ets/registry/ApplessRegistryPeerAgent';
 
-class FixedPeerAgentModel implements LocalModel {
+class QueuePeerAgentModel implements LocalModel {
   readonly prompts: string[] = [];
-  private readonly output: string;
+  private readonly outputs: string[];
 
-  constructor(output: string) {
-    this.output = output;
+  constructor(outputs: string[]) {
+    this.outputs = outputs.slice();
   }
 
   async complete(
@@ -61,7 +63,8 @@ class FixedPeerAgentModel implements LocalModel {
     _systemPrompt?: string
   ): Promise<string> {
     this.prompts.push(prompt);
-    return this.output;
+    if (this.outputs.length === 0) throw new Error('No queued Peer Agent response.');
+    return this.outputs.shift() as string;
   }
 }
 
@@ -366,32 +369,53 @@ export default function applessRegistryA2aTest(): void {
         name: 'later.txt', mimeType: 'text/plain', byteLength: 1,
         modifiedAt: 30, path: '/later.txt'
       }];
-      const newest = newestAgentFile(files);
-      expect(newest === null).assertFalse();
-      if (newest !== null) expect(newest.name).assertEqual('later.txt');
+      const selectable = selectableAgentFiles(files);
+      expect(selectable.length).assertEqual(3);
+      expect(selectable[0].name).assertEqual('later.txt');
+      expect(selectable[0].fileId).assertEqual('file-1');
     });
 
-    it('lets the LLM select the peer file tool instead of matching message keywords', 0, async () => {
+    it('lets the LLM list files before answering an inventory question', 0, async () => {
       expect(REGISTRY_PEER_DIRECT_MODE_ENABLED).assertFalse();
-      const model = new FixedPeerAgentModel('{"action":"tool","toolId":"' +
-        REGISTRY_PEER_SEND_FILE_TOOL_ID + '","arguments":{}}');
-      const decision = await planRegistryPeerAgentAction(model, '任意自然语言');
-      expect(decision.action).assertEqual(ApplessRegistryPeerAgentAction.SEND_FILE);
-      expect(model.prompts.length).assertEqual(1);
-      expect(model.prompts[0].indexOf('任意自然语言') >= 0).assertTrue();
+      const model = new QueuePeerAgentModel([
+        '{"action":"tool","toolId":"' + REGISTRY_PEER_LIST_FILES_TOOL_ID + '","arguments":{}}',
+        '{"action":"reply","reply":"还有 report.pdf"}'
+      ]);
+      const turn = await runRegistryPeerAgentTurn(model, '有其他文件吗',
+        (): ApplessRegistryPeerAgentFile[] => [{
+        fileId: 'file-1', name: 'tic-tac-toe.html', mimeType: 'text/html', byteLength: 2178
+      }, {
+        fileId: 'file-2', name: 'report.pdf', mimeType: 'application/pdf', byteLength: 1024
+      }], 'tic-tac-toe.html');
+      expect(turn.decision.action).assertEqual(ApplessRegistryPeerAgentAction.REPLY);
+      expect(turn.decision.reply).assertEqual('还有 report.pdf');
+      expect(turn.listed).assertTrue();
+      expect(model.prompts.length).assertEqual(2);
+      expect(model.prompts[1].indexOf('report.pdf') >= 0).assertTrue();
     });
 
-    it('rejects unknown peer tools and supports model replies without file side effects', 0, async () => {
-      const replyModel = new FixedPeerAgentModel('{"action":"reply","reply":"收到"}');
-      const reply = await planRegistryPeerAgentAction(replyModel, '你好');
-      expect(reply.action).assertEqual(ApplessRegistryPeerAgentAction.REPLY);
-      expect(reply.reply).assertEqual('收到');
+    it('lets the LLM select one observed fileId and rejects unknown peer tools', 0, async () => {
+      const model = new QueuePeerAgentModel([
+        '{"action":"tool","toolId":"' + REGISTRY_PEER_LIST_FILES_TOOL_ID + '","arguments":{}}',
+        '{"action":"tool","toolId":"' + REGISTRY_PEER_SEND_FILE_TOOL_ID +
+          '","arguments":{"fileId":"file-2"}}'
+      ]);
+      const turn = await runRegistryPeerAgentTurn(model, '把 PDF 发给我',
+        (): ApplessRegistryPeerAgentFile[] => [{
+        fileId: 'file-1', name: 'game.html', mimeType: 'text/html', byteLength: 100
+      }, {
+        fileId: 'file-2', name: 'report.pdf', mimeType: 'application/pdf', byteLength: 200
+      }], '');
+      expect(turn.decision.action).assertEqual(ApplessRegistryPeerAgentAction.SEND_FILE);
+      expect(turn.decision.fileId).assertEqual('file-2');
 
-      const unknownModel = new FixedPeerAgentModel(
-        '{"action":"tool","toolId":"registry.peer.delete_file","arguments":{}}');
+      const unknownModel = new QueuePeerAgentModel([
+        '{"action":"tool","toolId":"registry.peer.delete_file","arguments":{}}'
+      ]);
       let rejected = false;
       try {
-        await planRegistryPeerAgentAction(unknownModel, '执行未知工具');
+        await runRegistryPeerAgentTurn(
+          unknownModel, '执行未知工具', (): ApplessRegistryPeerAgentFile[] => [], '');
       } catch (_error) {
         rejected = true;
       }

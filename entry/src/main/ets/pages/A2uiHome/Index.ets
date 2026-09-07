@@ -513,13 +513,15 @@ import {
 } from '../../registry/ApplessRegistryOutboundClient';
 import {
   ApplessAgentEncodedFile,
-  latestRegistryInboxFileForTransfer
+  ApplessAgentSelectableFile,
+  encodeAgentFile,
+  selectableRegistryInboxFiles
 } from '../../registry/ApplessRegistryAgentFileCapability';
 import {
   ApplessRegistryPeerAgentAction,
-  ApplessRegistryPeerAgentDecision,
-  planRegistryPeerAgentAction,
-  REGISTRY_PEER_DIRECT_MODE_ENABLED
+  ApplessRegistryPeerAgentFile,
+  REGISTRY_PEER_DIRECT_MODE_ENABLED,
+  runRegistryPeerAgentTurn
 } from '../../registry/ApplessRegistryPeerAgent';
 import {
   executeApplessRegistryTool,
@@ -539,6 +541,12 @@ import {
   RegistryPeerStoredFile,
   storeRegistryPeerFile
 } from '../../registry/ApplessRegistryFileStore';
+
+interface RegistryPeerAgentExecutionPlan {
+  action: ApplessRegistryPeerAgentAction;
+  reply: string;
+  file: ApplessAgentSelectableFile | null;
+}
 
 interface FoodStoreMapLocationActionArgs {
   surfaceId: string;
@@ -1288,6 +1296,7 @@ struct Index {
   private registryPeerFileRequestResults: Map<string, string> = new Map<string, string>();
   private registryPeerFileRequestOrder: string[] = [];
   private registryPeerFileRequestsInFlight: Set<string> = new Set<string>();
+  private registryPeerLastSentFileByServiceId: Map<string, string> = new Map<string, string>();
   private phoneLocalMemoryRuntime: PhoneLocalMemoryRuntime | null = null;
   private phoneLocalMemoryAvailability: PhoneLocalMemoryAvailabilityPort | null = null;
   private bimStoreInstance: BimStore | null = null;
@@ -4699,13 +4708,13 @@ struct Index {
             ' chars=' + input.text.length.toString() + ' mode=direct');
           return a2aCompletedResponse(input.requestId, 'DELIVERED');
         }
-        const decision = await this.registryPeerAgentDecision(
-          config, input.text);
-        if (decision.action === ApplessRegistryPeerAgentAction.SEND_FILE) {
-          return await this.handleRegistryPeerFileTool(request, config, input);
+        const plan = await this.registryPeerAgentPlan(
+          config, input.senderServiceId, input.text);
+        if (plan.action === ApplessRegistryPeerAgentAction.SEND_FILE && plan.file !== null) {
+          return await this.handleRegistryPeerFileTool(request, config, input, plan.file);
         }
-        this.appendRegistryPeerMessage(input.senderServiceId, 'user', decision.reply);
-        return a2aCompletedResponse(input.requestId, decision.reply);
+        this.appendRegistryPeerMessage(input.senderServiceId, 'user', plan.reply);
+        return a2aCompletedResponse(input.requestId, plan.reply);
       } catch (error) {
         const detail = error instanceof Error ? error.message : JSON.stringify(error);
         aiLogError('[ApplessRegistryPeerAgent] stage=failed peer=' + input.senderServiceId +
@@ -5723,10 +5732,11 @@ struct Index {
     return messageId;
   }
 
-  private async registryPeerAgentDecision(
+  private async registryPeerAgentPlan(
     config: ApplessRegistryConfig,
+    serviceId: string,
     message: string
-  ): Promise<ApplessRegistryPeerAgentDecision> {
+  ): Promise<RegistryPeerAgentExecutionPlan> {
     const provider = new LlmProvider(
       'ApplessRegistryPeer',
       config.modelApiKey,
@@ -5735,16 +5745,40 @@ struct Index {
       config.modelCustomParametersJson
     );
     if (!provider.isConfigured()) throw new Error('Peer Agent model is not configured.');
-    const decision = await planRegistryPeerAgentAction(
-      new OpenAiCompatibleModel(provider), message);
-    aiLogInfo('[ApplessRegistryPeerAgent] stage=decision action=' + decision.action);
-    return decision;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    let selectableFiles: ApplessAgentSelectableFile[] = [];
+    const turn = await runRegistryPeerAgentTurn(
+      new OpenAiCompatibleModel(provider),
+      message,
+      (): ApplessRegistryPeerAgentFile[] => {
+        selectableFiles = selectableRegistryInboxFiles(context);
+        return selectableFiles.map((file: ApplessAgentSelectableFile): ApplessRegistryPeerAgentFile => ({
+          fileId: file.fileId,
+          name: file.name,
+          mimeType: file.mimeType,
+          byteLength: file.byteLength
+        }));
+      },
+      this.registryPeerLastSentFileByServiceId.get(serviceId) ?? ''
+    );
+    let selected: ApplessAgentSelectableFile | null = null;
+    if (turn.decision.action === ApplessRegistryPeerAgentAction.SEND_FILE) {
+      for (let index = 0; index < selectableFiles.length; index++) {
+        if (selectableFiles[index].fileId === turn.decision.fileId) selected = selectableFiles[index];
+      }
+      if (selected === null) throw new Error('Peer Agent selected an unavailable file.');
+    }
+    aiLogInfo('[ApplessRegistryPeerAgent] stage=decision action=' + turn.decision.action +
+      ' rounds=' + (turn.listed ? '2' : '1') +
+      (turn.decision.fileId.length > 0 ? ' fileId=' + turn.decision.fileId : ''));
+    return { action: turn.decision.action, reply: turn.decision.reply, file: selected };
   }
 
   private async handleRegistryPeerFileTool(
     request: TunnelForwardRequest,
     config: ApplessRegistryConfig,
-    input: A2aTextRequest
+    input: A2aTextRequest,
+    file: ApplessAgentSelectableFile
   ): Promise<TunnelHttpResponse> {
     const replayKey = input.senderServiceId + ':' + request.messageId;
     const previousFile = this.registryPeerFileRequestResults.get(replayKey);
@@ -5756,11 +5790,8 @@ struct Index {
     }
     this.registryPeerFileRequestsInFlight.add(replayKey);
     try {
-      const sent = await this.sendLatestRegistryPeerFile(
-        config, input.senderServiceId, '来自 ' + config.serviceId + ' 的文件');
-      if (sent === null) {
-        return a2aErrorResponse(404, 'Appless has no sandbox file available to send.', input.requestId);
-      }
+      const sent = await this.sendRegistryPeerSelectedFile(
+        config, input.senderServiceId, file, '来自 ' + config.serviceId + ' 的文件');
       this.rememberRegistryPeerFileRequest(replayKey, sent.name);
       return a2aCompletedResponse(input.requestId, '已发送文件：' + sent.name);
     } finally {
@@ -5768,14 +5799,13 @@ struct Index {
     }
   }
 
-  private async sendLatestRegistryPeerFile(
+  private async sendRegistryPeerSelectedFile(
     config: ApplessRegistryConfig,
     serviceId: string,
+    selected: ApplessAgentSelectableFile,
     text: string
-  ): Promise<ApplessAgentEncodedFile | null> {
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    const file = latestRegistryInboxFileForTransfer(context);
-    if (file === null) return null;
+  ): Promise<ApplessAgentEncodedFile> {
+    const file = encodeAgentFile(selected);
     const delivery = await sendRegistryPeerFile(
       config, serviceId, file.name, file.mimeType, file.bytes, text);
     if (delivery.state !== 'completed') throw new Error(delivery.text);
@@ -5789,6 +5819,7 @@ struct Index {
     }, 'user');
     aiLogInfo('[ApplessRegistryAgentFile] stage=delivered peer=' + serviceId +
       ' name=' + file.name + ' bytes=' + file.byteLength.toString());
+    this.registryPeerLastSentFileByServiceId.set(serviceId, file.name);
     return file;
   }
 
