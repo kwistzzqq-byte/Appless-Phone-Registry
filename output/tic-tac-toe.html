@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>井字棋</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; text-align: center; background: #fafafa; color: #222; }
+    main { max-width: 360px; margin: 48px auto; padding: 20px; }
+    #board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 24px 0; }
+    .cell { aspect-ratio: 1; border: 1px solid #bbb; border-radius: 8px; background: white; font-size: 42px; }
+    #restart { border: 0; border-radius: 8px; padding: 10px 18px; background: #222; color: white; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>井字棋</h1>
+    <p id="status">轮到 X</p>
+    <div id="board" aria-label="井字棋棋盘"></div>
+    <button id="restart" type="button">重新开始</button>
+  </main>
+  <script>
+    const board = document.querySelector('#board');
+    const status = document.querySelector('#status');
+    const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    let cells, turn, over;
+
+    function reset() {
+      cells = Array(9).fill('');
+      turn = 'X';
+      over = false;
+      status.textContent = '轮到 X';
+      board.innerHTML = '';
+      cells.forEach((_, i) => {
+        const button = document.createElement('button');
+        button.className = 'cell';
+        button.type = 'button';
+        button.setAttribute('aria-label', `第 ${i + 1} 格`);
+        button.onclick = () => play(i, button);
+        board.appendChild(button);
+      });
+    }
+
+    function play(index, button) {
+      if (over || cells[index]) return;
+      cells[index] = turn;
+      button.textContent = turn;
+      if (wins.some(line => line.every(i => cells[i] === turn))) {
+        status.textContent = `${turn} 获胜`;
+        over = true;
+      } else if (cells.every(Boolean)) {
+        status.textContent = '平局';
+        over = true;
+      } else {
+        turn = turn === 'X' ? 'O' : 'X';
+        status.textContent = `轮到 ${turn}`;
+      }
+    }
+
+    document.querySelector('#restart').onclick = reset;
+    reset();
+  </script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@ohos/hypium';
+import { ConversationContext, LocalModel } from '@loop/agent-core';
 import {
   ApplessRegistryConfig,
   parseApplessRegistryConfig,
@@ -37,10 +38,32 @@ import {
 } from '../main/ets/registry/ApplessRegistryFileStore';
 import {
   ApplessAgentLocalFile,
-  ApplessPptTransferIntent,
-  newestAgentPpt,
-  pptTransferIntent
+  newestAgentFile
 } from '../main/ets/registry/ApplessRegistryAgentFileCapability';
+import {
+  ApplessRegistryPeerAgentAction,
+  REGISTRY_PEER_DIRECT_MODE_ENABLED,
+  REGISTRY_PEER_SEND_FILE_TOOL_ID,
+  planRegistryPeerAgentAction
+} from '../main/ets/registry/ApplessRegistryPeerAgent';
+
+class FixedPeerAgentModel implements LocalModel {
+  readonly prompts: string[] = [];
+  private readonly output: string;
+
+  constructor(output: string) {
+    this.output = output;
+  }
+
+  async complete(
+    prompt: string,
+    _conversation?: ConversationContext,
+    _systemPrompt?: string
+  ): Promise<string> {
+    this.prompts.push(prompt);
+    return this.output;
+  }
+}
 
 function config(token: string = ''): ApplessRegistryConfig {
   return {
@@ -316,7 +339,7 @@ export default function applessRegistryA2aTest(): void {
       expect(visibleRegistryPeerReplyText('  收到，我来看看。  ')).assertEqual('收到，我来看看。');
     });
 
-    it('builds a standard FilePart reply and selects the newest PPT for Agent transfer', 0, () => {
+    it('builds a standard FilePart reply and selects the newest sandbox file', 0, () => {
       const request = JSON.parse(registryPeerFileRequestJson(
         'deck.pptx',
         'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -343,27 +366,36 @@ export default function applessRegistryA2aTest(): void {
         name: 'later.txt', mimeType: 'text/plain', byteLength: 1,
         modifiedAt: 30, path: '/later.txt'
       }];
-      const newest = newestAgentPpt(files);
+      const newest = newestAgentFile(files);
       expect(newest === null).assertFalse();
-      if (newest !== null) expect(newest.name).assertEqual('new.pptx');
-      expect(pptTransferIntent('让 Phone2 把PPT发给我'))
-        .assertEqual(ApplessPptTransferIntent.REQUEST_FROM_PEER);
-      expect(pptTransferIntent('把PPT发过来'))
-        .assertEqual(ApplessPptTransferIntent.REQUEST_FROM_PEER);
-      expect(pptTransferIntent('把PPT给我'))
-        .assertEqual(ApplessPptTransferIntent.REQUEST_FROM_PEER);
-      expect(pptTransferIntent('我把PPT发给你'))
-        .assertEqual(ApplessPptTransferIntent.SEND_TO_PEER);
-      expect(pptTransferIntent('PPT给你'))
-        .assertEqual(ApplessPptTransferIntent.SEND_TO_PEER);
-      expect(pptTransferIntent('给对方发一个演示文稿'))
-        .assertEqual(ApplessPptTransferIntent.SEND_TO_PEER);
-      expect(pptTransferIntent('介绍一下 PPT'))
-        .assertEqual(ApplessPptTransferIntent.NONE);
-      expect(pptTransferIntent('怎么把PPT发给你？'))
-        .assertEqual(ApplessPptTransferIntent.NONE);
-      expect(pptTransferIntent('你知道谁能把PPT发给我吗？'))
-        .assertEqual(ApplessPptTransferIntent.NONE);
+      if (newest !== null) expect(newest.name).assertEqual('later.txt');
+    });
+
+    it('lets the LLM select the peer file tool instead of matching message keywords', 0, async () => {
+      expect(REGISTRY_PEER_DIRECT_MODE_ENABLED).assertFalse();
+      const model = new FixedPeerAgentModel('{"action":"tool","toolId":"' +
+        REGISTRY_PEER_SEND_FILE_TOOL_ID + '","arguments":{}}');
+      const decision = await planRegistryPeerAgentAction(model, '任意自然语言');
+      expect(decision.action).assertEqual(ApplessRegistryPeerAgentAction.SEND_FILE);
+      expect(model.prompts.length).assertEqual(1);
+      expect(model.prompts[0].indexOf('任意自然语言') >= 0).assertTrue();
+    });
+
+    it('rejects unknown peer tools and supports model replies without file side effects', 0, async () => {
+      const replyModel = new FixedPeerAgentModel('{"action":"reply","reply":"收到"}');
+      const reply = await planRegistryPeerAgentAction(replyModel, '你好');
+      expect(reply.action).assertEqual(ApplessRegistryPeerAgentAction.REPLY);
+      expect(reply.reply).assertEqual('收到');
+
+      const unknownModel = new FixedPeerAgentModel(
+        '{"action":"tool","toolId":"registry.peer.delete_file","arguments":{}}');
+      let rejected = false;
+      try {
+        await planRegistryPeerAgentAction(unknownModel, '执行未知工具');
+      } catch (_error) {
+        rejected = true;
+      }
+      expect(rejected).assertTrue();
     });
 
     it('exposes Registry operations as standard Agent tools', 0, () => {
