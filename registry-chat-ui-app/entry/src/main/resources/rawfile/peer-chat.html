@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Appless 对话</title>
+  <style>
+    :root { color-scheme: light; --ink:#342d29; --muted:#81766f; --line:rgba(116,93,78,.16); --paper:rgba(255,253,249,.94); --mine:#eee6e1; --accent:#9b5f4c; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; }
+    body { font-family:system-ui,-apple-system,"HarmonyOS Sans SC",sans-serif; color:var(--ink); background:#fffaf5; }
+    body::before { content:""; position:fixed; inset:0; z-index:-1; background:
+      radial-gradient(circle at 96% 20%,rgba(255,199,144,.38),transparent 27%),
+      radial-gradient(circle at 7% 55%,rgba(219,188,255,.30),transparent 32%),
+      radial-gradient(circle at 74% 84%,rgba(183,221,255,.31),transparent 34%); }
+    .app { height:100%; padding:16px 28px 104px; display:flex; flex-direction:column; }
+    header { min-height:80px; display:flex; align-items:flex-start; justify-content:space-between; }
+    .brand { width:38px; height:38px; display:grid; place-items:center; color:var(--accent); font-size:22px; font-weight:800; transform:skew(-8deg); }
+    .peer { text-align:right; }
+    .peer h1 { margin:0; font-size:21px; line-height:1.2; font-weight:760; letter-spacing:-.02em; }
+    .peer p { margin:4px 0 0; color:var(--muted); font-size:14px; }
+    .history { flex:1; overflow:hidden; padding:8px 12px 20px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; }
+    .row { display:flex; width:100%; }
+    .row.mine { justify-content:flex-end; }
+    .bubble { max-width:78%; padding:13px 15px; border:1px solid var(--line); border-radius:18px; background:var(--paper); box-shadow:0 8px 22px rgba(78,57,44,.035); font-size:16px; line-height:1.5; }
+    .mine .bubble { background:var(--mine); border-color:transparent; border-bottom-right-radius:8px; }
+    .peer-row .bubble { border-bottom-left-radius:8px; }
+    .file { width:min(82%,440px); display:grid; grid-template-columns:52px 1fr 18px; gap:12px; align-items:center; padding:12px; }
+    .file-icon { width:52px; height:52px; display:grid; place-items:center; border-radius:12px; background:#f1e4de; color:var(--accent); font-size:13px; font-weight:750; }
+    .file strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:16px; }
+    .file small { display:block; margin-top:4px; color:var(--muted); font-size:13px; }
+    .file-arrow { color:var(--accent); font-size:26px; }
+    .dock { position:absolute; left:28px; right:28px; bottom:24px; height:64px; display:flex; align-items:center; gap:12px; padding:6px 8px 6px 18px; border:1px solid var(--line); border-radius:32px; background:rgba(255,255,255,.9); box-shadow:0 10px 28px rgba(70,49,37,.09); }
+    .dock > span:first-child { flex:1; min-width:0; color:#9a918b; text-align:center; font-size:16px; white-space:nowrap; }
+    .dock .send { flex:0 0 52px; width:52px; height:52px; display:grid; place-items:center; border-radius:50%; background:#d2cfcc; color:white; font-size:27px; line-height:1; }
+    .notice { position:absolute; left:0; right:0; bottom:4px; text-align:center; color:#b3aaa5; font-size:13px; transform:translateY(100%); }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="brand" aria-hidden="true">A</div>
+      <div class="peer"><h1>Appless-Phone2</h1><p>在线 · 注册中心</p></div>
+    </header>
+    <section class="history" aria-label="对话预览">
+      <div class="row mine"><div class="bubble">你好，方便聊一下吗？</div></div>
+      <div class="row peer-row"><div class="bubble">当然，可以的。</div></div>
+      <div class="row mine"><div class="bubble">把资料发给我看看</div></div>
+      <div class="row peer-row"><div class="bubble file">
+        <span class="file-icon">FILE</span>
+        <span><strong>项目资料.pdf</strong><small>248 KB · 点击打开</small></span>
+        <span class="file-arrow">›</span>
+      </div></div>
+    </section>
+    <div class="dock" aria-label="输入栏预览"><span>点击输入或按住说话</span><span class="send">↑</span><div class="notice">静态界面预览</div></div>
+  </main>
+</body>
+</html>

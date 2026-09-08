@@ -1,0 +1,6 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "Appless peer-chat UI demo" },
+    { "name": "EntryAbility_label", "value": "Appless Chat UI" }
+  ]
+}
